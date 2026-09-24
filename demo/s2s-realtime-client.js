@@ -249,6 +249,7 @@ export class S2sRealtimeClient extends EventTarget {
       strict: false,
       execute: async (args, _context, details) => {
         const callId = details?.toolCall?.callId || "";
+        const originResponseId = this._activeResponseId;
         const argumentsJson = JSON.stringify(args ?? {});
         if (!this.options.executeTool) throw new Error(`No executor for ${definition.name}`);
         const result = await this.options.executeTool({
@@ -256,6 +257,10 @@ export class S2sRealtimeClient extends EventTarget {
           arguments: argumentsJson,
           callId,
         });
+        // The SDK sends function_call_output and response.create as soon as
+        // execute returns. Our server still owns the originating response
+        // until response.done, and rejects an early follow-up response.create.
+        await this._waitForResponseDone(originResponseId);
         if (result.image) this._session?.addImage(result.image, { triggerResponse: false });
         return result.output;
       },
@@ -265,6 +270,29 @@ export class S2sRealtimeClient extends EventTarget {
       instructions: this.options.instructions,
       voice: this.options.voice,
       tools,
+    });
+  }
+
+  /** Wait for the response that requested a tool before the SDK submits its result. */
+  _waitForResponseDone(responseId) {
+    if (!responseId || this._activeResponseId !== responseId || this._closed) return Promise.resolve();
+    return new Promise((resolve) => {
+      const onFinished = (event) => {
+        if (event.detail.responseId !== responseId) return;
+        cleanup();
+        resolve();
+      };
+      const onStatus = (event) => {
+        if (event.detail.status !== "closed" && event.detail.status !== "error") return;
+        cleanup();
+        resolve();
+      };
+      const cleanup = () => {
+        this.removeEventListener("response-finished", onFinished);
+        this.removeEventListener("status", onStatus);
+      };
+      this.addEventListener("response-finished", onFinished);
+      this.addEventListener("status", onStatus);
     });
   }
 

@@ -2,9 +2,7 @@
 /**
  * Developer mode entry point.
  *
- * Loaded only when the page is opened with `?debug=1` (or the existing
- * `s2s.debug` flag is set), and imported dynamically so a normal visit never
- * downloads, parses or runs any of it.
+ * Loaded by the DEV button, a saved choice, or `?debug=1`.
  *
  * The lab attaches to a live session through the client's read-only event tap.
  * It cannot send, cancel or reorder anything: the one place it touches the
@@ -65,7 +63,8 @@ class Lab {
     this._renderQueued = false;
     this.panel.setBaseline(readBaseline());
     document.body.append(this.panel.el);
-    document.body.classList.add("lab-open");
+    this.visible = false;
+    this.setVisible(true);
     // Developer mode is already an explicit opt-in, so exposing the lab costs
     // nothing and is what makes scripted runs drivable from outside the page
     // (see demo/scripts/run_scenario.mjs).
@@ -74,12 +73,20 @@ class Lab {
 
   /** Coalesce renders: a busy turn emits events far faster than a useful repaint. */
   _scheduleRender() {
+    if (!this.visible) return;
     if (this._renderQueued) return;
     this._renderQueued = true;
     requestAnimationFrame(() => {
       this._renderQueued = false;
       this.panel.render();
     });
+  }
+
+  setVisible(visible) {
+    this.visible = visible;
+    this.panel.el.hidden = !visible;
+    document.body.classList.toggle("lab-open", visible);
+    if (visible) this.panel.render();
   }
 
   /**

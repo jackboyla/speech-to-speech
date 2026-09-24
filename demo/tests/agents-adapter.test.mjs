@@ -6,6 +6,33 @@ import * as realtime from "@openai/agents/realtime";
 import { S2sRealtimeClient } from "../s2s-realtime-client.js";
 import { waitFor } from "./helpers.mjs";
 
+test("camera output waits for its tool-call response to finish before sending the image", async () => {
+  globalThis.localStorage = { getItem() { return null; } };
+  globalThis.OpenAIAgentsRealtime = realtime;
+
+  const sent = [];
+  const client = new S2sRealtimeClient({
+    transport: "websocket",
+    voice: "Aiden",
+    instructions: "Test.",
+    tools: [{ type: "function", name: "camera_snapshot", description: "Take a picture.", parameters: { type: "object", properties: {} } }],
+    async executeTool() { return { output: "Snapshot captured.", image: "data:image/jpeg;base64,AA==" }; },
+  });
+  client._session = { addImage(image, options) { sent.push({ image, options }); } };
+  client._onTransportEvent({ type: "response.created", response: { id: "response-camera" } });
+  const invocation = client._buildAgent().tools[0].invoke({}, "{}", { toolCall: { callId: "call-camera" } })
+    .then((output) => sent.push({ output }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(sent, []);
+
+  client._onTransportEvent({ type: "response.done", response: { id: "response-camera", status: "completed" } });
+  await invocation;
+  assert.deepEqual(sent, [
+    { image: "data:image/jpeg;base64,AA==", options: { triggerResponse: false } },
+    { output: "Snapshot captured." },
+  ]);
+});
+
 test("the pinned SDK changes the live voice and explicitly clears all tools", async () => {
   globalThis.localStorage = { getItem() { return null; } };
   globalThis.OpenAIAgentsRealtime = realtime;

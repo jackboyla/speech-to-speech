@@ -1,11 +1,10 @@
 // @ts-check
 /**
- * Whether developer mode was asked for.
+ * Whether developer mode was saved or requested by a direct link.
  *
  * Deliberately its own module with no imports: `main.js` needs the answer on
  * every page load, and importing it must not drag the rest of the lab into the
- * initial bundle. Everything else in `lab/` is behind a dynamic import that
- * only runs when this returns true.
+ * initial bundle. The DEV button can also load the lab later.
  */
 
 /** @returns {boolean} */

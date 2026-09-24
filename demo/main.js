@@ -23,15 +23,50 @@ import { labRequested } from "./lab/flag.js";
 import { ChatView } from "./ui/chat.js";
 import { Account } from "./ui/account.js";
 
-// Developer mode (?debug=1). The module that does the work is imported only if
-// the flag is set, so an ordinary visit never fetches or runs any of it.
+// The developer button loads the lab on demand. The URL flag remains useful
+// for scripted runs and direct links.
 /** @type {any} */
 let lab = null;
-if (labRequested()) {
-  void import("./lab/index.js").then(async (module) => {
-    lab = await module.createLab();
-  }).catch((err) => console.error("[lab] failed to load", err));
+const developerBtn = $("#developer-btn");
+/** @type {Promise<void> | null} */
+let labLoad = null;
+function setDeveloperButton(on) {
+  developerBtn.setAttribute("aria-pressed", String(on));
+  developerBtn.title = on ? "Close developer tools" : "Open developer tools";
 }
+function saveDeveloperChoice(on) {
+  try {
+    if (on) localStorage.setItem("s2s.debug", "1");
+    else localStorage.removeItem("s2s.debug");
+  } catch { /* Storage is optional. */ }
+  const url = new URL(location.href);
+  if (url.searchParams.has("debug")) {
+    url.searchParams.delete("debug");
+    history.replaceState(null, "", url);
+  }
+}
+function loadLab() {
+  if (labLoad) return labLoad;
+  developerBtn.disabled = true;
+  labLoad = import("./lab/index.js").then(async (module) => {
+    lab = await module.createLab();
+    if (client) lab.attach(client, { audioContext: client._ctx ?? client.options.audioContext ?? null });
+    setDeveloperButton(true);
+    saveDeveloperChoice(true);
+  }).catch((err) => {
+    labLoad = null;
+    console.error("[lab] failed to load", err);
+  }).finally(() => { developerBtn.disabled = false; });
+  return labLoad;
+}
+developerBtn.addEventListener("click", () => {
+  if (!lab) { void loadLab(); return; }
+  const visible = !lab.visible;
+  lab.setVisible(visible);
+  setDeveloperButton(visible);
+  saveDeveloperChoice(visible);
+});
+if (labRequested()) void loadLab();
 
 const DEFAULT_VOICE = "Aiden";
 const DEFAULT_INSTRUCTIONS = "You are a friendly voice assistant.";

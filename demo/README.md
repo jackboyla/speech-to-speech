@@ -266,19 +266,30 @@ transport pick, and `s2s.audio.inputId` / `s2s.audio.outputId` for devices).
 
 ## Developer mode
 
-Open any deployment with `?debug=1` for an instrumented view: a timeline for
+Press **DEV** in the demo header to open or close an instrumented view: a timeline for
 every turn, latency measured from the moment the user stops talking, the raw
 protocol stream, and a scenario runner that drives scripted conversations from
 prerecorded audio.
+
+The choice is saved in this browser. A direct link with `?debug=1` still opens
+the lab for scripted runs; `?debug=0` starts with it closed.
 
 ```
 http://localhost:7860/?debug=1
 ```
 
-The module is behind a dynamic import, so an ordinary visit never fetches it,
+The module loads only when the lab is first opened, so an ordinary visit never fetches it,
 and it only ever reads — it cannot send, cancel or reorder anything on the
 session. Full notes, including what each number means and what the page can
 *not* observe over WebRTC, are in [`lab/README.md`](lab/README.md).
+
+Run the demo checks from `demo/` with `npm test`. In a worktree that shares the
+main checkout's Python environment, set `S2S_PYTHON` to that environment's
+Python first, for example:
+
+```bash
+S2S_PYTHON=/path/to/main/.venv/bin/python npm test
+```
 
 ## Audio pipeline notes
 

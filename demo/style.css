@@ -194,6 +194,18 @@ a:hover {
   gap: 10px;
 }
 
+.developer-btn {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .06em;
+}
+
+.developer-btn[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--bg-elev-2);
+  border-color: var(--border-strong);
+}
+
 /* The HF user pill: compact avatar + handle. Rendered as a flex row so
  * the avatar stays aligned with the text baseline even when the text
  * wraps on narrow viewports. */
