@@ -257,8 +257,28 @@ transport pick, and `s2s.audio.inputId` / `s2s.audio.outputId` for devices).
 | `ws/user-audio-recorder.js` | Bounded sent-PCM buffer + VAD slicing + browser-playable WAV wrapping |
 | `ws/orb-visualizer.js` | `OrbVisualiser`: FFT bands -> orb CSS custom properties |
 | `worklets/mic-capture.js` | AudioWorklet: 48 kHz Float32 -> 24 kHz Int16 PCM, posts ~40 ms chunks |
-| `worklets/audio-playback.js` | AudioWorklet: 24 kHz Float32 ring buffer -> 48 kHz, linear interp, fade in/out |
+| `worklets/audio-playback.js` | AudioWorklet: 24 kHz Float32 ring buffer -> 48 kHz, linear interp, fade in/out, playback edge marks |
 | `style.css` | Orb animations, layout, dark theme (verbatim from the WebRTC app) |
+| `lab/` | Developer mode: per-turn timeline, latency breakdown, raw events, scenario runner ([README](lab/README.md)) |
+| `scripts/make_lab_fixtures.py` | Generates the utterances the scenario runner speaks |
+| `scripts/slow_llm.py` | Stub language model with a settable time to first token |
+| `scripts/run_scenario.mjs` | Runs one scenario headlessly and prints the trace |
+
+## Developer mode
+
+Open any deployment with `?debug=1` for an instrumented view: a timeline for
+every turn, latency measured from the moment the user stops talking, the raw
+protocol stream, and a scenario runner that drives scripted conversations from
+prerecorded audio.
+
+```
+http://localhost:7860/?debug=1
+```
+
+The module is behind a dynamic import, so an ordinary visit never fetches it,
+and it only ever reads — it cannot send, cancel or reorder anything on the
+session. Full notes, including what each number means and what the page can
+*not* observe over WebRTC, are in [`lab/README.md`](lab/README.md).
 
 ## Audio pipeline notes
 
@@ -267,7 +287,7 @@ transport pick, and `s2s.audio.inputId` / `s2s.audio.outputId` for devices).
   resamples to 24 kHz (boxcar lowpass + decimation on the 48 -> 24 fast
   path, linear interpolation fallback for odd rates) and packs Int16 LE.
 - **Browser cache safety**: the entry module, realtime client, and both audio
-  worklet URLs share the `audio-24k-v1` cache key. The client also waits for
+  worklet URLs share the `audio-24k-v2` cache key. The client also waits for
   the capture worklet to report the same version and a 24 kHz output rate
   before opening a session. When the browser-audio contract or sample rate
   changes, bump the key in `index.html`, `main.js`, and

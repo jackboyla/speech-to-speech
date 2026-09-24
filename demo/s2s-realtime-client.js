@@ -49,7 +49,7 @@ import { OrbVisualiser, VIS_FFT_SIZE } from "./ws/orb-visualizer.js";
 import { SentAudioRecorder } from "./ws/user-audio-recorder.js";
 
 export const AUDIO_SAMPLE_RATE = 24_000;
-export const AUDIO_WORKLET_VERSION = "audio-24k-v1";
+export const AUDIO_WORKLET_VERSION = "audio-24k-v2";
 const MIC_CHUNK_MS = 40;
 const CAPTURE_CONFIG_TIMEOUT_MS = 2_000;
 const SPEAKING_OPEN_DB = -50;
@@ -336,6 +336,15 @@ export class S2sRealtimeClient extends EventTarget {
         outputChannelCount: [1],
       });
       playback.port.postMessage({ kind: "config", inputRate: AUDIO_SAMPLE_RATE });
+      playback.port.onmessage = (event) => {
+        const data = event.data;
+        if (!data || typeof data !== "object") return;
+        // Timestamps are taken here, on arrival, and the worklet's own
+        // AudioContext-clock reading is passed through untouched.
+        this.dispatchEvent(new CustomEvent("playback-mark", { detail: {
+          ...data, at: performance.now(), outputLatency: ctx.outputLatency ?? 0,
+        } }));
+      };
       const output = ctx.createAnalyser();
       output.fftSize = VIS_FFT_SIZE;
       output.smoothingTimeConstant = 0.3;
@@ -378,10 +387,21 @@ export class S2sRealtimeClient extends EventTarget {
     if (output > Math.pow(10, SPEAKING_OPEN_DB / 20)) {
       this._lastAudibleAt = now;
       if (this._activeResponseId) this._audibleResponses.add(this._activeResponseId);
+      // Rising edge only. Over WebRTC the output is a remote MediaStream, so
+      // this poll is the only evidence the page has that sound is playing —
+      // and its resolution is the poll interval, not the audio clock.
+      if (!this._aiSpeaking) {
+        this.dispatchEvent(new CustomEvent("playback-mark", { detail: {
+          kind: "rtc-audible", at: now, resolutionMs: 50,
+        } }));
+      }
       this._aiSpeaking = true;
       this._markAudible();
     } else if (this._aiSpeaking && now - this._lastAudibleAt > SPEAKING_HANG_MS) {
       this._aiSpeaking = false;
+      this.dispatchEvent(new CustomEvent("playback-mark", { detail: {
+        kind: "rtc-silent", at: now, resolutionMs: 50, hangMs: SPEAKING_HANG_MS,
+      } }));
     }
   }
 
@@ -406,7 +426,14 @@ export class S2sRealtimeClient extends EventTarget {
       const sample = view.getInt16(i * 2, true);
       samples[i] = sample < 0 ? sample / 0x8000 : sample / 0x7fff;
     }
+    const sampleCount = samples.length;
     this._playbackNode.port.postMessage({ kind: "audio", samples }, [samples.buffer]);
+    this.dispatchEvent(new CustomEvent("audio-packet", { detail: {
+      responseId: event.responseId ?? "",
+      samples: sampleCount,
+      durationMs: (sampleCount / AUDIO_SAMPLE_RATE) * 1000,
+      at: performance.now(),
+    } }));
     if (event.responseId) this._audibleResponses.add(event.responseId);
     this._aiSpeaking = true;
     this._markAudible();
@@ -415,6 +442,7 @@ export class S2sRealtimeClient extends EventTarget {
   _clearPlayback() {
     this._playbackNode?.port.postMessage({ kind: "clear" });
     this._aiSpeaking = false;
+    this.dispatchEvent(new CustomEvent("playback-cleared", { detail: { at: performance.now() } }));
   }
 
   /** @param {ArrayBuffer} buffer */
@@ -429,6 +457,12 @@ export class S2sRealtimeClient extends EventTarget {
     const type = event?.type;
     if (typeof type !== "string") return;
     if (this._debug) console.debug(`[${this.options.transport}]`, event);
+    // Read-only tap, before the switch so observers also see the event types
+    // this adapter has no behaviour for. Anything listening here must not be
+    // able to change what the session does.
+    this.dispatchEvent(new CustomEvent("protocol-event", { detail: {
+      event, type, at: performance.now(), transport: this.options.transport,
+    } }));
     switch (type) {
       case "input_audio_buffer.speech_started": {
         this._clearPlayback();

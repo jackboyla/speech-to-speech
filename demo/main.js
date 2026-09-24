@@ -17,10 +17,21 @@
  * @typedef {S2sRealtimeClient} RealtimeClient
  */
 
-import { S2sRealtimeClient } from "./s2s-realtime-client.js?v=audio-24k-v1";
+import { S2sRealtimeClient } from "./s2s-realtime-client.js?v=audio-24k-v2";
 import { $, truncateError, DEBUG } from "./ui/dom.js";
+import { labRequested } from "./lab/flag.js";
 import { ChatView } from "./ui/chat.js";
 import { Account } from "./ui/account.js";
+
+// Developer mode (?debug=1). The module that does the work is imported only if
+// the flag is set, so an ordinary visit never fetches or runs any of it.
+/** @type {any} */
+let lab = null;
+if (labRequested()) {
+  void import("./lab/index.js").then(async (module) => {
+    lab = await module.createLab();
+  }).catch((err) => console.error("[lab] failed to load", err));
+}
 
 const DEFAULT_VOICE = "Aiden";
 const DEFAULT_INSTRUCTIONS = "You are a friendly voice assistant.";
@@ -1320,6 +1331,14 @@ async function primeMicPermission() {
 /** Acquire the live capture stream once a slot is granted. Permission was primed
  *  in the tap gesture, so this is silent. Stored module-side for mute + teardown. */
 async function acquireMicStream() {
+  // Developer mode can substitute a scripted source so a scenario speaks the
+  // same words the same way every run. Nothing downstream changes: the capture
+  // worklet, noise gate and send cadence still run exactly as they do live.
+  const scripted = lab?.micStreamOverride?.() ?? null;
+  if (scripted) {
+    micStream = scripted;
+    return micStream;
+  }
   micStream = await navigator.mediaDevices.getUserMedia(micConstraints());
   return micStream;
 }
@@ -1394,11 +1413,15 @@ async function doStart(audioContext = null) {
   // release it. The real capture stream is acquired only once a slot is granted
   // (see acquireMicStream), so the mic 'in use' indicator never lights while we
   // sit in the queue. Permission persists, so the later acquire is silent.
-  try {
-    await primeMicPermission();
-  } catch (err) {
-    if (audioContext) void audioContext.close().catch(() => {});
-    throw err;
+  // A scripted developer-mode run captures from fixtures, so there is no reason
+  // to ask for a microphone it will never open.
+  if (!lab?.willScriptMic?.()) {
+    try {
+      await primeMicPermission();
+    } catch (err) {
+      if (audioContext) void audioContext.close().catch(() => {});
+      throw err;
+    }
   }
 
   // The webcam is started on arrival (autoStartCamera), so nothing to do here;
@@ -1433,6 +1456,7 @@ async function doStart(audioContext = null) {
         ...common,
       });
   client = c;
+  lab?.attach(c, { audioContext });
   c.setMuted(micMuted || userAudioReplaying);
 
   c.addEventListener("queue", (e) => {

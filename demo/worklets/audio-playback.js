@@ -15,6 +15,16 @@
  *     { kind: "stats", queuedMs, played }               every ~250 ms
  *     { kind: "underrun" }                              every time the queue
  *                                                      runs dry mid-playback
+ *     { kind: "playback-started", contextTime }          first sample of a run
+ *     { kind: "playback-stopped", contextTime }          last sample of a run
+ *
+ * The two playback marks exist because the main thread cannot see when sound
+ * actually reaches the output. It knows when it *posted* samples; the gap
+ * between that and the first sample leaving this processor is queueing, and on
+ * a fresh turn it is the difference between "audio arrived" and "the user heard
+ * something". `contextTime` is the AudioContext clock at the start of the
+ * render quantum, so it still excludes the device's own output latency
+ * (`AudioContext.outputLatency`), which the reader has to add back.
  *
  * Underrun strategy: output silence. We do NOT hold the last sample (that
  * tends to produce audible clicks/buzzes when long gaps appear between
@@ -39,6 +49,7 @@ class AudioPlaybackProcessor extends AudioWorkletProcessor {
     this._fadeIn = 0;
     this._fadeOut = 0;
     this._lastSample = 0;
+    this._announcedPlaying = false;
 
     this.port.onmessage = (e) => {
       const data = e.data;
@@ -54,9 +65,9 @@ class AudioPlaybackProcessor extends AudioWorkletProcessor {
           if (data.samples instanceof Float32Array && data.samples.length > 0) {
             this._queue.push(data.samples);
             if (!this._playing) {
-              this._playing = true;
               this._fadeIn = FADE_FRAMES;
               this._fadeOut = 0;
+              this._setPlaying(true);
             }
           }
           break;
@@ -68,6 +79,25 @@ class AudioPlaybackProcessor extends AudioWorkletProcessor {
           break;
       }
     };
+  }
+
+  /**
+   * Flip the playing flag.
+   *
+   * Only the *stop* edge is announced here. The start edge is announced from
+   * `process()`, at the quantum that actually writes a sample: queueing audio
+   * and emitting it are different moments, and the gap between them is exactly
+   * what the lab is trying to measure.
+   */
+  _setPlaying(next) {
+    if (this._playing === next) return;
+    this._playing = next;
+    if (next) {
+      this._announcedPlaying = false;
+    } else if (this._announcedPlaying) {
+      this._announcedPlaying = false;
+      this.port.postMessage({ kind: "playback-stopped", contextTime: currentTime });
+    }
   }
 
   _queuedSamples() {
@@ -124,11 +154,15 @@ class AudioPlaybackProcessor extends AudioWorkletProcessor {
           sample = this._lastSample * Math.max(0, 1 - 1 / FADE_FRAMES);
           this._lastSample = sample;
           if (Math.abs(sample) < 1e-4) {
-            this._playing = false;
             this._lastSample = 0;
+            this._setPlaying(false);
             this.port.postMessage({ kind: "underrun" });
           }
         } else {
+          if (!this._announcedPlaying) {
+            this._announcedPlaying = true;
+            this.port.postMessage({ kind: "playback-started", contextTime: currentTime });
+          }
           sample = v;
           this._lastSample = v;
           this._advance();
@@ -144,8 +178,8 @@ class AudioPlaybackProcessor extends AudioWorkletProcessor {
           sample *= gain;
           this._fadeOut -= 1;
           if (this._fadeOut === 0) {
-            this._playing = false;
             this._lastSample = 0;
+            this._setPlaying(false);
           }
         }
 
