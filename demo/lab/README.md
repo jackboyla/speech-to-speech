@@ -134,6 +134,35 @@ This is how a race gets run thirty times in a row.
 
 ---
 
+## Reaching it from another machine
+
+The page needs a secure context: `getUserMedia` and `AudioWorklet` are refused
+over plain HTTP anywhere but `localhost`, so opening the demo on a LAN address
+gives a dead orb and a console error. Tailscale hands out a real certificate for
+the machine's tailnet name, which solves it without a reverse proxy or a
+self-signed certificate to click through.
+
+Both the page *and* the backend need exposing. The page is fetched by the
+browser, but so is the realtime WebSocket — the demo hands the URL to the
+client, which dials it directly — and a page on `https:` may only open `wss:`.
+
+```bash
+# the page, and the backend it will dial
+tailscale serve --bg --https=10000 http://127.0.0.1:7871
+tailscale serve --bg --https=10001 http://127.0.0.1:18775
+
+# tell the demo to advertise the backend's tailnet address, not localhost
+SPEECH_TO_SPEECH_URL=wss://<machine>.<tailnet>.ts.net:10001/v1/realtime \
+  uvicorn --app-dir demo server:app --port 7871
+```
+
+Then open `https://<machine>.<tailnet>.ts.net:10000/?debug=1`. Ports 443 and
+8443 are the other two Tailscale serves on HTTPS; 10000 upwards are free.
+
+Undo with `tailscale serve --https=10000 off`.
+
+---
+
 ## The turn-ordering race
 
 Issue [#308](https://github.com/huggingface/speech-to-speech/issues/308) is
