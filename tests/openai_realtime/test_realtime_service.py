@@ -4693,7 +4693,11 @@ class TestDispatchPipelineEvent:
         assert [item.content[0].text for item in user_items] == (
             ["previous turn", "hello again"] if previous_turn else ["hello again"]
         )
-        assert set(service._state(conn_id).input_turn_accounting) == {turn_id}
+        # The unanswered previous turn keeps its record until the next turn, in
+        # case its late final has yet to arrive.
+        assert set(service._state(conn_id).input_turn_accounting) == {turn_id} | (
+            {"turn_1"} if previous_turn else set()
+        )
         assert service.response_input_turn(conn_id)[:2] == (turn_id, 1)
         first_req = text_prompt_queue.get_nowait()
         second_req = text_prompt_queue.get_nowait()
