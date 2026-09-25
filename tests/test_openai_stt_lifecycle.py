@@ -756,3 +756,21 @@ def test_session_end_cancels_real_stalled_http(stalled_stt_endpoint, monkeypatch
         handler.queue_in.put(PIPELINE_END)
         worker.join(timeout=2)
     assert not worker.is_alive()
+
+
+def test_final_request_of_a_replaced_turn_stays_current(handler_factory):
+    tracker = SpeculativeTurnTracker()
+    tracker.start_turn()
+    handler = handler_factory(tracker=tracker)
+    audio = np.zeros(160, dtype=np.float32)
+    final = stt_module._TranscriptionRequest(
+        VADAudio(audio=audio, mode="final", turn_id="turn_1", turn_revision=0), handler._session_generation
+    )
+    progressive = stt_module._TranscriptionRequest(
+        VADAudio(audio=audio, mode="progressive", turn_id="turn_1", turn_revision=0), handler._session_generation
+    )
+
+    tracker.start_turn()
+
+    assert handler._request_is_current(final)
+    assert not handler._request_is_current(progressive)

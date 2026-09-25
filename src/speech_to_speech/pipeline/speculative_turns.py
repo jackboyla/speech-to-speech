@@ -40,12 +40,18 @@ class SpeculativeTurnTracker:
         self._current: _TurnReference | None = None
         self._committed: set[_TurnReference] = set()
         self._closed_current: _TurnReference | None = None
+        # The unanswered turn a newer turn replaced. Its final transcript can
+        # still join the conversation, but it can never be answered by itself.
+        self._superseded: _TurnReference | None = None
         self._pending_reopen: _PendingReopen | None = None
         self._reopen_grace: _ReopenGrace | None = None
 
     def start_turn(self) -> tuple[str, int]:
         """Advance the conversation cursor and return the new turn metadata."""
         with self._condition:
+            previous = self._current
+            answered = previous in self._committed or previous == self._closed_current
+            self._superseded = None if previous is None or answered else previous
             self._sequence += 1
             self._current = _TurnReference(
                 sequence=self._sequence,
@@ -260,6 +266,18 @@ class SpeculativeTurnTracker:
                 self._closed_current = committed
             self._condition.notify_all()
 
+    def is_superseded(self, turn_id: str | None, revision: int | None) -> bool:
+        """Return whether a newer turn replaced this unanswered turn revision.
+
+        Only the latest revision of the turn immediately before the current
+        one qualifies, so earlier revisions and older turns stay stale.
+        """
+        if turn_id is None or revision is None:
+            return False
+        with self._condition:
+            superseded = self._superseded
+            return superseded is not None and (superseded.turn_id, superseded.revision) == (turn_id, revision)
+
     def is_current_turn(self, turn_id: str | None) -> bool:
         """Return whether *turn_id* is the conversation's current turn at any revision."""
         with self._condition:
@@ -453,6 +471,7 @@ class SpeculativeTurnTracker:
             self._current = None
             self._committed.clear()
             self._closed_current = None
+            self._superseded = None
             self._pending_reopen = None
             self._reopen_grace = None
             self._condition.notify_all()

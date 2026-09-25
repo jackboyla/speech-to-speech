@@ -431,7 +431,12 @@ def test_failed_revision_removes_superseded_chat_text(session):
     assert_input_lifecycle_contract(session.events)
 
 
-def test_late_transcript_does_not_recreate_a_committed_item(session):
+def test_late_transcript_of_replaced_turn_joins_the_next_answer(session):
+    """Slow STT: the user speaks again before the first turn's transcript is ready.
+
+    The replaced turn is never answered by itself, but its words reach the
+    newer turn's answer, and client and chat histories agree.
+    """
     first = session.start_turn("turn_1")[0].item_id
     session.stop_speech("turn_1", 0, duration_s=1.0, audio_end_ms=1000)
     # The next turn settles the old audio before its transcription arrives.
@@ -443,26 +448,83 @@ def test_late_transcript_does_not_recreate_a_committed_item(session):
     ]
     assert published[1].previous_item_id is None
     assert published[2].previous_item_id is None
-    # The superseded turn's item is final: its late transcript and answer are
-    # stale, and its held state is released rather than waiting for them.
+
+    late = session.final("turn_1", 0, "What's the weather in Paris?")
+
+    assert [(event.type, event.item_id) for event in late] == [
+        ("conversation.item.input_audio_transcription.completed", first)
+    ]
+    assert session.text_prompt_queue.empty()
+    assert session.answer("turn_1", 0) == []
     state = session.service._state(session.conn_id)
     assert state.pending_input_terminals == {}
     assert first not in state.input_items
-    assert session.final("turn_1", 0, "First") == []
-    assert session.answer("turn_1", 0) == []
+
     session.stop_speech("turn_2", 0, duration_s=1.5, audio_end_ms=10500)
-    session.final("turn_2", 0, "Second")
-    previous = session.service._state(session.conn_id).last_item_id
+    session.final("turn_2", 0, "Hello? Are you there?")
+    assert session.text_prompt_queue.get_nowait().turn_id == "turn_2"
+    previous = state.last_item_id
     committed = session.answer("turn_2", 0)
     assert committed[1].previous_item_id == previous == first
-    assert committed[2].previous_item_id == previous
     assert (
         len([event for event in session.events if event.type == "conversation.item.created" and event.item.id == first])
         == 1
     )
-    assert session.client_history().user_turns == session.chat_user_turns() == ["Second"]
+    assert (
+        session.client_history().user_turns
+        == session.chat_user_turns()
+        == ["What's the weather in Paris?", "Hello? Are you there?"]
+    )
     assert_input_lifecycle_contract(session.events)
     assert_openai_schema(session.events)
+
+
+def test_late_transcript_of_replaced_turn_goes_before_the_newer_turn(session):
+    session.start_turn("turn_1")
+    session.stop_speech("turn_1", 0, duration_s=1.0, audio_end_ms=1000)
+    session.start_turn("turn_2", audio_start_ms=9000)
+    session.stop_speech("turn_2", 0, duration_s=1.5, audio_end_ms=10500)
+    session.final("turn_2", 0, "Hello? Are you there?")
+
+    session.final("turn_1", 0, "What's the weather in Paris?")
+    session.answer("turn_2", 0)
+
+    assert (
+        session.client_history().user_turns
+        == session.chat_user_turns()
+        == ["What's the weather in Paris?", "Hello? Are you there?"]
+    )
+    assert_input_lifecycle_contract(session.events)
+    assert_openai_schema(session.events)
+
+
+def test_final_of_an_older_replaced_turn_stays_stale(session):
+    first = session.start_turn("turn_1")[0].item_id
+    session.stop_speech("turn_1", 0, duration_s=1.0, audio_end_ms=1000)
+    session.start_turn("turn_2", audio_start_ms=9000)
+    session.stop_speech("turn_2", 0, duration_s=1.0, audio_end_ms=10000)
+    session.start_turn("turn_3", audio_start_ms=18000)
+
+    assert session.final("turn_1", 0, "Too late") == []
+    state = session.service._state(session.conn_id)
+    assert first not in state.input_items
+    assert "Too late" not in session.chat_user_turns()
+
+
+def test_late_failure_of_replaced_turn_closes_its_item(session):
+    first = session.start_turn("turn_1")[0].item_id
+    session.stop_speech("turn_1", 0, duration_s=1.0, audio_end_ms=1000)
+    session.start_turn("turn_2", audio_start_ms=9000)
+
+    events = session.dispatch(TranscriptionFailedEvent(message="STT failed", turn_id="turn_1", turn_revision=0))
+
+    assert [(event.type, event.item_id) for event in events] == [
+        ("conversation.item.input_audio_transcription.failed", first)
+    ]
+    state = session.service._state(session.conn_id)
+    assert state.pending_input_terminals == {}
+    assert first not in state.input_items
+    assert_input_lifecycle_contract(session.events)
 
 
 def test_direct_audio_commits_a_user_item_without_transcription(session):
@@ -488,5 +550,28 @@ def test_direct_audio_commits_a_user_item_without_transcription(session):
     assert committed[2].item.id == started.item_id
     assert not session.client_history().completed_items
     assert session.service._state(session.conn_id).input_items == {}
+    assert_input_lifecycle_contract(session.events)
+    assert_openai_schema(session.events)
+
+
+def test_late_final_of_reopened_replaced_turn_replaces_its_earlier_text(session):
+    session.start_turn("turn_1")
+    session.stop_speech("turn_1", 0, duration_s=1.0, audio_end_ms=1000)
+    session.final("turn_1", 0, "What's the weather")
+    session.resume_turn("turn_1", 0, audio_start_ms=1200)
+    session.stop_speech("turn_1", 1, duration_s=2.0, audio_end_ms=2000)
+    session.start_turn("turn_2", audio_start_ms=10000)
+
+    session.final("turn_1", 1, "What's the weather in Paris?")
+    session.stop_speech("turn_2", 0, duration_s=1.0, audio_end_ms=11000)
+    session.final("turn_2", 0, "Hello? Are you there?")
+    session.answer("turn_2", 0)
+
+    assert (
+        session.client_history().user_turns
+        == session.chat_user_turns()
+        == ["What's the weather in Paris?", "Hello? Are you there?"]
+    )
+    assert session.service._state(session.conn_id).response_usage.audio_duration_s == pytest.approx(3.0)
     assert_input_lifecycle_contract(session.events)
     assert_openai_schema(session.events)

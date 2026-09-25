@@ -187,9 +187,10 @@ class AudioHandler(RealtimeBaseHandler):
                 # A later revision replaced this one. The client never learned
                 # that the item stopped, so nothing has to be retracted.
                 return "discard"
-            # A newer turn replaced this one. Its user item is final, and no
-            # later event for it will be accepted, so release it once published.
-            pending.input_closed = True
+            # A newer turn replaced this one, so its user item is final. Keep
+            # routing state only while its late final can still arrive.
+            if not turns.is_superseded(pending.turn_id, pending.turn_revision):
+                pending.input_closed = True
             return "publish"
         if started_turn_id is not None and pending.turn_id != started_turn_id:
             return "publish"

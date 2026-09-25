@@ -1049,10 +1049,7 @@ class StatefulStreamingSTTHandler(BaseSTTHandler):
                 speech_stopped_at_s=vad_audio.created_at_s,
             )
             return
-        if self.speculative_turns is not None and not self.speculative_turns.is_latest(
-            vad_audio.turn_id,
-            vad_audio.turn_revision,
-        ):
+        if not self._is_latest_turn_item(vad_audio, wait_for_pending_reopen=False, wait_for_stability=False):
             return
         if commit.completed_at_s is not None:
             store = getattr(self, "turn_latency_store", None)

@@ -280,9 +280,22 @@ def test_stt_handler_bulk_drops_progressives_queued_before_matching_final():
     queue_in.put(_vad_audio(turn_id="turn_2", revision=0, mode="progressive"))
     tracker.start_turn()
 
-    assert handler._drop_stale_queued_inputs() == 2
-    remaining = queue_in.get_nowait()
+    # The replaced turn's final is kept: its words join the conversation.
+    assert handler._drop_stale_queued_inputs() == 1
+    remaining = [queue_in.get_nowait(), queue_in.get_nowait()]
 
-    assert isinstance(remaining, VADAudio)
-    assert remaining.turn_id == "turn_2"
+    assert [(item.turn_id, item.mode) for item in remaining] == [("turn_1", "final"), ("turn_2", "progressive")]
     assert queue_in.empty()
+
+
+def test_stt_handler_keeps_only_the_final_of_a_replaced_turn():
+    tracker = SpeculativeTurnTracker()
+    tracker.start_turn()
+    handler = _handler(tracker, Queue(), Queue())
+
+    tracker.start_turn()
+
+    assert handler.should_process_input(_vad_audio(mode="final"))
+    assert not handler.should_process_input(_vad_audio(mode="progressive"))
+    assert handler.should_emit_output(Transcription(text="late", turn_id="turn_1", turn_revision=0))
+    assert not handler.should_emit_output(PartialTranscription(text="late", turn_id="turn_1", turn_revision=0))

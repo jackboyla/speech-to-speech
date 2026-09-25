@@ -1412,3 +1412,31 @@ def test_firered_preserves_candidate_audio_through_handler(speech_pad_ms, silent
     streamed = np.frombuffer(b"".join(sink.audio), dtype=np.int16)
     np.testing.assert_array_equal(streamed, pcm[expected_start : expected_start + len(audio)])
     np.testing.assert_array_equal(audio, pcm[expected_start : expected_start + len(audio)].astype(np.float32) / 32768)
+
+
+def test_only_the_latest_revision_of_the_replaced_unanswered_turn_is_superseded():
+    tracker = SpeculativeTurnTracker()
+    tracker.start_turn()
+    candidate = tracker.begin_reopen_candidate("turn_1", 0)
+    assert tracker.confirm_reopen_candidate("turn_1", 0, candidate)
+
+    tracker.start_turn()
+
+    assert tracker.is_superseded("turn_1", 1)
+    assert not tracker.is_superseded("turn_1", 0)
+    assert not tracker.is_latest("turn_1", 1)
+    tracker.start_turn()
+    assert not tracker.is_superseded("turn_1", 1)
+    assert tracker.is_superseded("turn_2", 0)
+    tracker.reset()
+    assert not tracker.is_superseded("turn_2", 0)
+
+
+def test_answered_turn_is_not_superseded():
+    tracker = SpeculativeTurnTracker()
+    tracker.start_turn()
+    tracker.commit("turn_1", 0)
+
+    tracker.start_turn()
+
+    assert not tracker.is_superseded("turn_1", 0)

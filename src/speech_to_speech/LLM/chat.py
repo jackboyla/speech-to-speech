@@ -232,6 +232,18 @@ class Chat:
                 return HISTORY_START_ANCHOR
             return self.buffer[-1].id
 
+    def anchor_before(self, item_id: str) -> str | None:
+        """Anchor that places a new item just before *item_id*.
+
+        ``None`` means *item_id* is gone, so callers fall back to appending.
+        """
+
+        with self._lock:
+            index = next((index for index, item in enumerate(self.buffer) if item.id == item_id), None)
+            if index is None:
+                return None
+            return HISTORY_START_ANCHOR if index == 0 else self.buffer[index - 1].id
+
     def _turn_insertion_index_locked(self, after_item_id: str | None) -> int | None:
         """Buffer index just past the turn anchored at *after_item_id*.
 

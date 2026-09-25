@@ -458,8 +458,7 @@ class OpenAICompatibleSTTHandler(BaseSTTHandler):
             source = request.source
             if self._is_completed_final_revision(source):
                 return False
-            tracker = self.speculative_turns
-            return tracker is None or tracker.is_latest(source.turn_id, source.turn_revision)
+            return self._is_latest_turn_item(source, wait_for_pending_reopen=False, wait_for_stability=False)
 
     @staticmethod
     def _cancel_request(request: _TranscriptionRequest, reason: str) -> None:

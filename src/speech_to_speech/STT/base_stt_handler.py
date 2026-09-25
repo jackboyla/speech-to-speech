@@ -109,7 +109,21 @@ class BaseSTTHandler(BaseHandler[STTIn, STTOut]):
             is_latest = self.speculative_turns.is_latest_after_pending_reopen(turn_id, turn_revision)
         else:
             is_latest = self.speculative_turns.is_latest(turn_id, turn_revision)
-        return is_latest
+        return is_latest or self._is_superseded_final(item)
+
+    def _is_superseded_final(self, item: object) -> bool:
+        """Whether *item* is the late final of the turn a newer turn replaced.
+
+        That turn is never answered, but its transcript still carries the
+        user's words, so it is transcribed and joins the conversation.
+        """
+        if self.speculative_turns is None or isinstance(item, PartialTranscription):
+            return False
+        if getattr(item, "mode", None) == "progressive":
+            return False
+        return self.speculative_turns.is_superseded(
+            getattr(item, "turn_id", None), getattr(item, "turn_revision", None)
+        )
 
     def _drop_stale_queued_inputs(self) -> int:
         if self.speculative_turns is None or not hasattr(self.queue_in, "mutex") or not hasattr(self.queue_in, "queue"):

@@ -635,6 +635,9 @@ class RealtimeService:
             return False
         turn_id = getattr(event, "turn_id", None)
         turn_revision = getattr(event, "turn_revision", None)
+        if isinstance(event, (TranscriptionCompletedEvent, TranscriptionFailedEvent)):
+            if self.speculative_turns.is_superseded(turn_id, turn_revision):
+                return False
         if isinstance(
             event,
             (
@@ -666,6 +669,10 @@ class RealtimeService:
 
     def _on_transcription_completed(self, conn_id: str, event: TranscriptionCompletedEvent) -> list[ServerEvent]:
         """Handle a final STT transcription: emit protocol event, append to chat, trigger LM."""
+        if self.speculative_turns is not None and self.speculative_turns.is_superseded(
+            event.turn_id, event.turn_revision
+        ):
+            return self._on_superseded_transcription(conn_id, event)
         st = self._state(conn_id)
         completed_events = self.conversation.on_transcription_completed(conn_id, event)
         if not completed_events:
@@ -729,6 +736,46 @@ class RealtimeService:
         # The chat now holds this revision's text, but the client only learns
         # about the user item once the turn is committed. A revision superseded
         # before then is replaced in the chat and discarded here.
+        self.audio.hold_input_terminal(
+            conn_id,
+            completed_events[0].item_id,
+            event.turn_id,
+            event.turn_revision,
+            terminal=completed_events[0],
+        )
+        return self.audio.resolve_input_terminals(conn_id)
+
+    def _on_superseded_transcription(self, conn_id: str, event: TranscriptionCompletedEvent) -> list[ServerEvent]:
+        """Add a replaced turn's late transcript to the chat without answering it.
+
+        A newer turn started before this final was ready. The newer turn's
+        response should still hear these words, so they go before its user
+        message, but the replaced turn never gets a response of its own.
+        """
+        st = self._state(conn_id)
+        self.turn_latency_store.discard_pending_turn(event.turn_id, event.turn_revision)
+        completed_events = self.conversation.on_transcription_completed(conn_id, event)
+        if not completed_events:
+            return []
+        chat = st.runtime_config.chat
+        if event.transcript:
+            # A speculative prefetch was generated without these words.
+            self.response.discard_tool_followup_prefetch(conn_id)
+            earlier = st.speculative_user_item_id if st.speculative_user_turn_id == event.turn_id else None
+            if earlier is not None and chat.replace_user_message_text(earlier, event.transcript):
+                # The earlier revision's audio is already counted, as in the
+                # normal same-turn path.
+                st.response_usage.audio_duration_s -= st.speculative_audio_duration_s
+                st.speculative_audio_duration_s = cast(
+                    UsageTranscriptTextUsageDuration, completed_events[0].usage
+                ).seconds
+            else:
+                newer = st.speculative_user_item_id
+                newer_is_current = self.speculative_turns is not None and self.speculative_turns.is_current_turn(
+                    st.speculative_user_turn_id
+                )
+                anchor = chat.anchor_before(newer) if newer is not None and newer_is_current else None
+                chat.add_item(make_user_message(event.transcript), after_item_id=anchor)
         self.audio.hold_input_terminal(
             conn_id,
             completed_events[0].item_id,
