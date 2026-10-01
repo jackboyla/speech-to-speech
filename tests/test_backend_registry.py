@@ -454,6 +454,7 @@ def test_openai_stt_backend_constructs_through_registry(monkeypatch):
     [
         ("openai-realtime", "OpenAIRealtimeSTTHandler", 24000),
         ("vllm-realtime", "VLLMRealtimeSTTHandler", 16000),
+        ("phonon", "PhononSTTHandler", 16000),
     ],
 )
 def test_streaming_stt_backends_parse_and_construct_through_registry(

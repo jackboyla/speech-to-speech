@@ -36,6 +36,7 @@ from speech_to_speech.arguments_classes.parakeet_tdt_arguments import (
 from speech_to_speech.arguments_classes.parakeet_unified_stt_arguments import (
     ParakeetUnifiedSTTHandlerArguments,
 )
+from speech_to_speech.arguments_classes.phonon_stt_arguments import PhononSTTHandlerArguments
 from speech_to_speech.arguments_classes.pocket_tts_arguments import PocketTTSHandlerArguments
 from speech_to_speech.arguments_classes.qwen3_asr_stt_arguments import Qwen3ASRSTTHandlerArguments
 from speech_to_speech.arguments_classes.qwen3_tts_arguments import Qwen3TTSHandlerArguments
@@ -480,6 +481,14 @@ STT_BACKENDS = build_backend_registry(
             OpenAIRealtimeSTTHandlerArguments,
             _create_streaming_stt("OpenAIRealtimeSTTHandler"),
             config_prefix="openai_realtime_stt",
+            capabilities=BackendCapabilities(streams_audio_chunks=True),
+        ),
+        BackendSpec(
+            "phonon",
+            "stt",
+            PhononSTTHandlerArguments,
+            _create_streaming_stt("PhononSTTHandler"),
+            config_prefix="phonon_stt",
             capabilities=BackendCapabilities(streams_audio_chunks=True),
         ),
         BackendSpec(

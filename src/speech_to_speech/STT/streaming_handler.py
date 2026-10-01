@@ -32,7 +32,7 @@ class StreamingTranscriptionError(RuntimeError):
 
 
 class _WebSocket(Protocol):
-    def send(self, message: str) -> None: ...
+    def send(self, message: str | bytes) -> None: ...
 
     def recv(self, timeout: float | None = None) -> str | bytes: ...
 
@@ -44,7 +44,7 @@ ConnectFactory = Callable[..., _WebSocket]
 
 @dataclass(frozen=True)
 class _ProtocolEvent:
-    kind: Literal["ignore", "committed", "delta", "completed", "failed", "error"]
+    kind: Literal["ignore", "committed", "delta", "hypothesis", "segment", "completed", "failed", "error"]
     text: str = ""
     language: str | None = None
     message: str = ""
@@ -60,7 +60,7 @@ class StreamingSTTProtocol(Protocol):
 
     def start_utterance(self) -> dict[str, Any] | None: ...
 
-    def append_audio(self, audio: bytes) -> dict[str, Any]: ...
+    def append_audio(self, audio: bytes) -> dict[str, Any] | bytes: ...
 
     def finish_utterance(self) -> dict[str, Any]: ...
 
@@ -216,6 +216,52 @@ class VLLMRealtimeProtocol:
 
 
 @dataclass(frozen=True)
+class PhononProtocol:
+    """Phonon's binary PCM and whole-hypothesis streaming dialect."""
+
+    model: str
+    language: str | None
+    audio_sample_rate: int
+
+    name = "phonon"
+    requires_session_created = False
+    requires_session_updated = False
+    closes_after_utterance = True
+
+    def session_update(self) -> dict[str, Any]:
+        return {"sample_rate": self.audio_sample_rate, "format": "pcm_s16le"}
+
+    def start_utterance(self) -> None:
+        return None
+
+    def append_audio(self, audio: bytes) -> bytes:
+        return audio
+
+    def finish_utterance(self) -> dict[str, Any]:
+        return {"type": "end"}
+
+    def discard_utterance(self) -> None:
+        return None
+
+    def parse_event(self, event: dict[str, Any]) -> _ProtocolEvent:
+        event_type = event.get("type")
+        if event_type == "error":
+            return _ProtocolEvent("error", message="remote transcription error")
+        if not isinstance(event_type, str):
+            return _ProtocolEvent("error", message="invalid Phonon event type")
+        if event_type not in {"partial", "final", "done"}:
+            return _ProtocolEvent("ignore")
+        text = event.get("text")
+        if not isinstance(text, str):
+            return _ProtocolEvent("error", message="invalid Phonon transcript")
+        if event_type == "partial":
+            return _ProtocolEvent("hypothesis", text=text, language="en")
+        if event_type == "final":
+            return _ProtocolEvent("segment", text=text, language="en")
+        return _ProtocolEvent("completed", text=text, language="en")
+
+
+@dataclass(frozen=True)
 class _AppendAudio:
     generation: int
     audio: bytes
@@ -296,14 +342,14 @@ def _default_connect(url: str, *, headers: dict[str, str], open_timeout: float) 
     return connect(url, additional_headers=headers, open_timeout=open_timeout, close_timeout=1.0)
 
 
-def _endpoint_url(base_url: str, model: str, *, include_model_query: bool) -> str:
+def _endpoint_url(base_url: str, model: str, *, include_model_query: bool, endpoint_path: str = "/realtime") -> str:
     split = urlsplit(base_url.strip())
     scheme = {"http": "ws", "https": "wss"}.get(split.scheme, split.scheme)
     if scheme not in {"ws", "wss"} or not split.netloc:
         raise ValueError("Streaming STT base_url must be an http(s) or ws(s) URL")
     path = split.path.rstrip("/")
-    if not path.endswith("/realtime"):
-        path = f"{path}/realtime"
+    if not path.endswith(endpoint_path):
+        path = f"{path}{endpoint_path}"
     query = dict(parse_qsl(split.query, keep_blank_values=True))
     # Hosted OpenAI transcription sessions select the session type with
     # intent=transcription. A transcription model in the query is rejected as
@@ -483,6 +529,7 @@ class _StreamingSession:
         utterance_started = False
         utterance_has_audio = False
         remote_hypothesis = ""
+        segment_prefix = ""
         audio_error: str | None = None
         audio_error_requires_close = False
         active_commit: _Commit | None = None
@@ -497,7 +544,8 @@ class _StreamingSession:
 
         def reset_utterance() -> None:
             nonlocal utterance_started, utterance_has_audio, remote_hypothesis, turn_id, turn_revision
-            nonlocal active_item_id, active_content_index
+            nonlocal active_item_id, active_content_index, segment_prefix
+            segment_prefix = ""
             utterance_started = False
             utterance_has_audio = False
             remote_hypothesis = ""
@@ -580,10 +628,10 @@ class _StreamingSession:
             if None in failed_turn_ids:
                 clear_failed_turn()
 
-        def send(event: dict[str, Any]) -> None:
+        def send(event: dict[str, Any] | bytes) -> None:
             if connection is None:
                 raise StreamingTranscriptionError("streaming transcription is not connected")
-            connection.send(json.dumps(event, separators=(",", ":")))
+            connection.send(event if isinstance(event, bytes) else json.dumps(event, separators=(",", ":")))
 
         def receive_setup_event(expected: str) -> None:
             if connection is None:
@@ -613,7 +661,8 @@ class _StreamingSession:
                     open_timeout=self.connect_timeout,
                 )
                 self._publish_connection(connection)
-                receive_setup_event("session.created")
+                if getattr(self.protocol, "requires_session_created", True):
+                    receive_setup_event("session.created")
                 send(self.protocol.session_update())
                 if self.protocol.requires_session_updated:
                     receive_setup_event("session.updated")
@@ -647,7 +696,7 @@ class _StreamingSession:
 
         def handle_protocol_event(event: _ProtocolEvent) -> None:
             nonlocal active_commit, active_item_id, active_content_index, remote_hypothesis
-            nonlocal audio_error, audio_error_requires_close
+            nonlocal audio_error, audio_error_requires_close, segment_prefix
             if active_commit is not None and perf_counter() >= active_commit.boundary_queued_at_s + self.final_timeout:
                 fail_connection(TimeoutError(), "streaming transcription timed out")
                 return
@@ -698,8 +747,20 @@ class _StreamingSession:
                         event.content_index,
                     )
                     return
-            elif event.kind in {"delta", "failed"} and active_commit is None and not utterance_has_audio:
+            elif (
+                event.kind in {"delta", "hypothesis", "segment", "failed"}
+                and active_commit is None
+                and not utterance_has_audio
+            ):
                 logger.debug("Ignoring unowned %s STT event without an item ID", self.protocol.name)
+                return
+            if event.kind in {"hypothesis", "segment"}:
+                if event.kind == "segment":
+                    segment_prefix = _join_transcripts(segment_prefix, event.text)
+                    remote_hypothesis = segment_prefix
+                else:
+                    remote_hypothesis = _join_transcripts(segment_prefix, event.text)
+                emit_partial()
                 return
             if event.kind == "delta":
                 if not event.text:
@@ -762,6 +823,8 @@ class _StreamingSession:
                 active_commit.turn_id,
                 active_commit.turn_revision,
             )
+            if getattr(self.protocol, "closes_after_utterance", False):
+                close_connection()
             active_commit.done.set()
             active_commit = None
             reset_utterance()
@@ -928,8 +991,9 @@ class _StreamingSession:
 class StatefulStreamingSTTHandler(BaseSTTHandler):
     """STT handler that pairs incremental PCM ingress with local VAD commits."""
 
-    protocol_type: type[OpenAIRealtimeProtocol] | type[VLLMRealtimeProtocol]
+    protocol_type: type[OpenAIRealtimeProtocol] | type[VLLMRealtimeProtocol] | type[PhononProtocol]
     include_model_query = False
+    endpoint_path = "/realtime"
     experimental = False
 
     def setup(
@@ -953,10 +1017,16 @@ class StatefulStreamingSTTHandler(BaseSTTHandler):
             raise ValueError("Streaming STT timeouts must be > 0")
         if self.protocol_type is VLLMRealtimeProtocol and audio_sample_rate != PIPELINE_SAMPLE_RATE:
             raise ValueError("vLLM Realtime STT requires 16 kHz PCM")
+        if self.protocol_type is PhononProtocol:
+            if audio_sample_rate != PIPELINE_SAMPLE_RATE:
+                raise ValueError("Phonon STT requires 16 kHz PCM")
+            if language and language != "en":
+                raise ValueError("Phonon STT supports English only")
         endpoint_url = _endpoint_url(
             base_url,
             model.strip(),
             include_model_query=self.include_model_query,
+            endpoint_path=self.endpoint_path,
         )
         if (
             self.protocol_type is OpenAIRealtimeProtocol
@@ -1083,3 +1153,34 @@ class OpenAIRealtimeSTTHandler(StatefulStreamingSTTHandler):
 class VLLMRealtimeSTTHandler(StatefulStreamingSTTHandler):
     protocol_type = VLLMRealtimeProtocol
     experimental = True
+
+
+class PhononSTTHandler(StatefulStreamingSTTHandler):
+    protocol_type = PhononProtocol
+    endpoint_path = "/audio/stream"
+
+    def setup(
+        self,
+        base_url: str = "ws://localhost:8000/v1",
+        model: str = "phonon-2",
+        audio_sample_rate: int = PIPELINE_SAMPLE_RATE,
+        connect_timeout: float = 10.0,
+        final_timeout: float = 60.0,
+        api_key: str | None = None,
+        language: str | None = "en",
+        speculative_turns: SpeculativeTurnTracker | None = None,
+        connect_factory: ConnectFactory | None = None,
+        pipeline_index: int | None = None,
+    ) -> None:
+        super().setup(
+            base_url=base_url,
+            model=model,
+            audio_sample_rate=audio_sample_rate,
+            connect_timeout=connect_timeout,
+            final_timeout=final_timeout,
+            api_key=api_key,
+            language=language,
+            speculative_turns=speculative_turns,
+            connect_factory=connect_factory,
+            pipeline_index=pipeline_index,
+        )

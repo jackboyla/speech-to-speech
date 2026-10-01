@@ -256,6 +256,9 @@ or another compatible server, see
 [OpenAI-compatible STT](./docs/openai-compatible-stt.md).
 For native incremental audio and partial transcripts, see
 [stateful streaming STT](./docs/openai-compatible-stt.md#stateful-streaming-stt).
+For Phonon-2 native streaming, setup commands, and a paced comparison with Parakeet,
+see [Phonon streaming](./docs/phonon-streaming.md) and
+[the benchmark guide](./docs/phonon-benchmark.md).
 
 ## Commands
 
