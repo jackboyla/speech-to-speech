@@ -1,0 +1,272 @@
+{
+  "backend": "moonshine",
+  "model": "medium-streaming",
+  "machine": "Jacks-MacBook-Air.local",
+  "platform": "macOS-27.0-arm64-arm-64bit",
+  "python": "3.11.14 (main, Oct 28 2025, 12:11:54) [Clang 20.1.4 ]",
+  "torch": "2.14.1",
+  "device": "cpu",
+  "threads": 4,
+  "chunk_ms": 32,
+  "partial_interval_s": 0.5,
+  "manifest": "/Users/jackboylan/workspace/speech-to-speech-phonon/progress/evaluations/librispeech-mini/manifest.jsonl",
+  "manifest_sha256": "1dc6cce2121d065cc239da569d1ab2f023fd3cf867e7aaf6555cb2b17fd750ce",
+  "benchmark_sha256": "730c043689d718b29f5e7a47d0929ff7587b41b8d5841c971446d783cc21df62",
+  "cuda_visible_devices": null,
+  "accuracy_normalization": "casefold, remove punctuation, split whitespace; word edit distance",
+  "package_versions": {
+    "numpy": "2.4.6",
+    "soundfile": "0.14.0",
+    "soxr": "1.1.0",
+    "websockets": "17.1",
+    "nano-parakeet": null,
+    "mlx": "0.32.3",
+    "mlx-audio": "0.5.7",
+    "moonshine-voice": "0.1.5"
+  },
+  "warmup": [
+    {
+      "duration_s": 5.855,
+      "first_partial_s": 1.229537542007165,
+      "partial_count": 11,
+      "final_latency_s": 0.4232855830050539,
+      "audio_feed_s": 5.8647186669986695,
+      "elapsed_s": 6.2880762919958215,
+      "client_cpu_s": 9.97831,
+      "transcript": "Mister Quilter is the apostle of the middle classes, and we are glad to welcome his gospel.",
+      "errors": []
+    }
+  ],
+  "clips": [
+    {
+      "duration_s": 5.855,
+      "first_partial_s": 1.1368997500103433,
+      "partial_count": 10,
+      "final_latency_s": 0.13858891700510867,
+      "audio_feed_s": 5.887180000019725,
+      "elapsed_s": 6.025825208023889,
+      "client_cpu_s": 8.398841999999998,
+      "transcript": "Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel.",
+      "errors": [],
+      "id": "1272-128104-0000",
+      "audio": "/Users/jackboylan/workspace/speech-to-speech-phonon/progress/evaluations/librispeech-mini/1272-128104-0000.flac",
+      "text": "MISTER QUILTER IS THE APOSTLE OF THE MIDDLE CLASSES AND WE ARE GLAD TO WELCOME HIS GOSPEL",
+      "word_errors": 1,
+      "reference_words": 17,
+      "wer": 0.058823529411764705
+    },
+    {
+      "duration_s": 4.815,
+      "first_partial_s": 1.1501441250147764,
+      "partial_count": 8,
+      "final_latency_s": 0.09758962501655333,
+      "audio_feed_s": 4.816448375000618,
+      "elapsed_s": 4.914089083991712,
+      "client_cpu_s": 6.370488999999999,
+      "transcript": "Nor is Mister Quilter's manner less interesting than his matter.",
+      "errors": [],
+      "id": "1272-128104-0001",
+      "audio": "/Users/jackboylan/workspace/speech-to-speech-phonon/progress/evaluations/librispeech-mini/1272-128104-0001.flac",
+      "text": "NOR IS MISTER QUILTER'S MANNER LESS INTERESTING THAN HIS MATTER",
+      "word_errors": 0,
+      "reference_words": 10,
+      "wer": 0.0
+    },
+    {
+      "duration_s": 12.485,
+      "first_partial_s": 1.1532418749993667,
+      "partial_count": 22,
+      "final_latency_s": 0.12312695899163373,
+      "audio_feed_s": 12.586571916006505,
+      "elapsed_s": 12.70976229099324,
+      "client_cpu_s": 18.883278,
+      "transcript": "He tells us that at this festive season of the year, with Christmas and roast beef looming before us. Similes drawn from eating and its results occur most readily to the mind.",
+      "errors": [],
+      "id": "1272-128104-0002",
+      "audio": "/Users/jackboylan/workspace/speech-to-speech-phonon/progress/evaluations/librispeech-mini/1272-128104-0002.flac",
+      "text": "HE TELLS US THAT AT THIS FESTIVE SEASON OF THE YEAR WITH CHRISTMAS AND ROAST BEEF LOOMING BEFORE US SIMILES DRAWN FROM EATING AND ITS RESULTS OCCUR MOST READILY TO THE MIND",
+      "word_errors": 0,
+      "reference_words": 32,
+      "wer": 0.0
+    },
+    {
+      "duration_s": 9.9,
+      "first_partial_s": 1.1472467500134371,
+      "partial_count": 16,
+      "final_latency_s": 0.11394683399703354,
+      "audio_feed_s": 9.98551683302503,
+      "elapsed_s": 10.099514708010247,
+      "client_cpu_s": 16.544579,
+      "transcript": "He has grave doubts whether Sir Frederick Leighton's work is really Greek after all, and can discover in it but little of rocky Ithaca.",
+      "errors": [],
+      "id": "1272-128104-0003",
+      "audio": "/Users/jackboylan/workspace/speech-to-speech-phonon/progress/evaluations/librispeech-mini/1272-128104-0003.flac",
+      "text": "HE HAS GRAVE DOUBTS WHETHER SIR FREDERICK LEIGHTON'S WORK IS REALLY GREEK AFTER ALL AND CAN DISCOVER IN IT BUT LITTLE OF ROCKY ITHACA",
+      "word_errors": 0,
+      "reference_words": 24,
+      "wer": 0.0
+    },
+    {
+      "duration_s": 29.4,
+      "first_partial_s": 1.161728042003233,
+      "partial_count": 52,
+      "final_latency_s": 0.146805000025779,
+      "audio_feed_s": 29.48812149997684,
+      "elapsed_s": 29.634975583001506,
+      "client_cpu_s": 46.67876499999999,
+      "transcript": "Linnell's pictures are a sort of. Up guards and atom paintings. And Mason's exquisite idylls are as national as a jingo poem. Mr. Burke at Foster's landscapes smile at one much in the same way that Mr. Carker used to flash his teeth. And Mister John Collier gives his sitter a cheerful slap in the back before he says, like a shampooer in a Turkish bath next man.",
+      "errors": [],
+      "id": "1272-128104-0004",
+      "audio": "/Users/jackboylan/workspace/speech-to-speech-phonon/progress/evaluations/librispeech-mini/1272-128104-0004.flac",
+      "text": "LINNELL'S PICTURES ARE A SORT OF UP GUARDS AND AT EM PAINTINGS AND MASON'S EXQUISITE IDYLLS ARE AS NATIONAL AS A JINGO POEM MISTER BIRKET FOSTER'S LANDSCAPES SMILE AT ONE MUCH IN THE SAME WAY THAT MISTER CARKER USED TO FLASH HIS TEETH AND MISTER JOHN COLLIER GIVES HIS SITTER A CHEERFUL SLAP ON THE BACK BEFORE HE SAYS LIKE A SHAMPOOER IN A TURKISH BATH NEXT MAN",
+      "word_errors": 7,
+      "reference_words": 68,
+      "wer": 0.10294117647058823
+    },
+    {
+      "duration_s": 9.01,
+      "first_partial_s": 1.1625379999750294,
+      "partial_count": 15,
+      "final_latency_s": 0.1323044589953497,
+      "audio_feed_s": 9.013247208000394,
+      "elapsed_s": 9.145599707990186,
+      "client_cpu_s": 12.702585,
+      "transcript": "It is obviously unnecessary for us to point out how luminous these criticisms are, how delicate an expression.",
+      "errors": [],
+      "id": "1272-128104-0005",
+      "audio": "/Users/jackboylan/workspace/speech-to-speech-phonon/progress/evaluations/librispeech-mini/1272-128104-0005.flac",
+      "text": "IT IS OBVIOUSLY UNNECESSARY FOR US TO POINT OUT HOW LUMINOUS THESE CRITICISMS ARE HOW DELICATE IN EXPRESSION",
+      "word_errors": 1,
+      "reference_words": 18,
+      "wer": 0.05555555555555555
+    },
+    {
+      "duration_s": 5.64,
+      "first_partial_s": 1.142384040984325,
+      "partial_count": 9,
+      "final_latency_s": 0.09897849999833852,
+      "audio_feed_s": 5.801841957989382,
+      "elapsed_s": 5.900874165992718,
+      "client_cpu_s": 7.274380999999991,
+      "transcript": "On the general principles of art, Mr. Quilter writes with equal lucidity.",
+      "errors": [],
+      "id": "1272-128104-0006",
+      "audio": "/Users/jackboylan/workspace/speech-to-speech-phonon/progress/evaluations/librispeech-mini/1272-128104-0006.flac",
+      "text": "ON THE GENERAL PRINCIPLES OF ART MISTER QUILTER WRITES WITH EQUAL LUCIDITY",
+      "word_errors": 1,
+      "reference_words": 12,
+      "wer": 0.08333333333333333
+    },
+    {
+      "duration_s": 9.24,
+      "first_partial_s": 1.6984011249733157,
+      "partial_count": 16,
+      "final_latency_s": 0.006348249997245148,
+      "audio_feed_s": 9.339544499991462,
+      "elapsed_s": 9.345942999992985,
+      "client_cpu_s": 9.844876999999997,
+      "transcript": "Painting, he tells us, is. Of a different quality to mathematics, And finish in art is. Adding more factor.",
+      "errors": [],
+      "id": "1272-128104-0007",
+      "audio": "/Users/jackboylan/workspace/speech-to-speech-phonon/progress/evaluations/librispeech-mini/1272-128104-0007.flac",
+      "text": "PAINTING HE TELLS US IS OF A DIFFERENT QUALITY TO MATHEMATICS AND FINISH IN ART IS ADDING MORE FACT",
+      "word_errors": 1,
+      "reference_words": 19,
+      "wer": 0.05263157894736842
+    },
+    {
+      "duration_s": 5.12,
+      "first_partial_s": 1.1496340410085395,
+      "partial_count": 9,
+      "final_latency_s": 0.1336473750125151,
+      "audio_feed_s": 5.124562832992524,
+      "elapsed_s": 5.258256500004791,
+      "client_cpu_s": 5.660315999999995,
+      "transcript": "As for etchings, there are two kinds. British and foreign.",
+      "errors": [],
+      "id": "1272-128104-0008",
+      "audio": "/Users/jackboylan/workspace/speech-to-speech-phonon/progress/evaluations/librispeech-mini/1272-128104-0008.flac",
+      "text": "AS FOR ETCHINGS THEY ARE OF TWO KINDS BRITISH AND FOREIGN",
+      "word_errors": 2,
+      "reference_words": 11,
+      "wer": 0.18181818181818182
+    },
+    {
+      "duration_s": 18.29,
+      "first_partial_s": 1.1332776250201277,
+      "partial_count": 35,
+      "final_latency_s": 0.35286512499442324,
+      "audio_feed_s": 18.4221512080112,
+      "elapsed_s": 18.775061708001886,
+      "client_cpu_s": 29.537930999999986,
+      "transcript": "He laments most bitterly the divorce that has been made between decorative art and. What we usually call pictures Makes the customary appeal to the last judgment, and reminds us that in the great days of art, Michael Angelo was the furnishing upholsterer.",
+      "errors": [],
+      "id": "1272-128104-0009",
+      "audio": "/Users/jackboylan/workspace/speech-to-speech-phonon/progress/evaluations/librispeech-mini/1272-128104-0009.flac",
+      "text": "HE LAMENTS MOST BITTERLY THE DIVORCE THAT HAS BEEN MADE BETWEEN DECORATIVE ART AND WHAT WE USUALLY CALL PICTURES MAKES THE CUSTOMARY APPEAL TO THE LAST JUDGMENT AND REMINDS US THAT IN THE GREAT DAYS OF ART MICHAEL ANGELO WAS THE FURNISHING UPHOLSTERER",
+      "word_errors": 0,
+      "reference_words": 43,
+      "wer": 0.0
+    }
+  ],
+  "scope": "benchmark-only Moonshine bridge; native library VAD; no repo adapter/LLM/TTS",
+  "model_metadata": {
+    "path": "/Users/jackboylan/Library/Caches/moonshine_voice/download.moonshine.ai/model/medium-streaming-en/quantized_26_08_21",
+    "architecture": "MEDIUM_STREAMING",
+    "runtime_options": {
+      "identify_speakers": "false"
+    },
+    "files": [
+      {
+        "name": "adapter.ort",
+        "bytes": 3651296,
+        "sha256": "3f2a287def57cc094367a0eec3c4f5fc36a32ec420e86764b696920991b20281"
+      },
+      {
+        "name": "cross_kv.ort",
+        "bytes": 11643776,
+        "sha256": "642f6e21cd305be79342207c6f9e6b681d469d55bc48c72b27b84846fb71fd1e"
+      },
+      {
+        "name": "decoder_kv.ort",
+        "bytes": 146972408,
+        "sha256": "193bb366492b74fc4ad338c6778e8d8eb916aaa11b5aa264f9057f4db7759486"
+      },
+      {
+        "name": "encoder.ort",
+        "bytes": 94705376,
+        "sha256": "12915e76ebac7dd287c5ea63965d06103a53ba1ce242a4a34f318f3958c60c37"
+      },
+      {
+        "name": "frontend.model.ort",
+        "bytes": 28720,
+        "sha256": "95768855c70c8251eeecc05fedf69999da1b8ab16f605c9f457fd3354b0ad6b5"
+      },
+      {
+        "name": "frontend.weights.ort",
+        "bytes": 11889560,
+        "sha256": "5ac941f490cbe035b335b99a414cc393d62d4c6f9f2423495b286870d271d709"
+      },
+      {
+        "name": "streaming_config.json",
+        "bytes": 513,
+        "sha256": "28e83b7a28e91472692a035e0dae3116422ae43aeb2bef5ed822c44ce89b88af"
+      },
+      {
+        "name": "tokenizer.bin",
+        "bytes": 249974,
+        "sha256": "6884b35fd6377d4c4d32336a0bc152f36b64d1e45b6503683cdc238250a8472d"
+      }
+    ]
+  },
+  "handler_startup_s": 0.3794886249816045,
+  "warmup_failures": 0,
+  "successful_clips": 10,
+  "failed_clips": 0,
+  "reference_words_total": 254,
+  "word_errors_total": 13,
+  "wer": 0.051181102362204724,
+  "median_first_partial_s": 1.149889083011658,
+  "median_final_latency_s": 0.12771570899349172,
+  "client_peak_rss_bytes": 1185038336
+}

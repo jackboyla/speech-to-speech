@@ -1,0 +1,274 @@
+[
+  {
+    "case": {
+      "id": "whisper-tiny-current",
+      "backend": "mlx-audio-whisper",
+      "model": "mlx-community/whisper-tiny-asr-fp16",
+      "device": "mps"
+    },
+    "resources_before": {
+      "time": 1790890885.832085,
+      "uptime": "22:41  up 5 days,  6:02, 6 users, load averages: 2.29 3.46 4.31\n",
+      "df -h /": "Filesystem        Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk3s1s1   228Gi    13Gi    18Gi    43%    484k  185M    0%   /\n",
+      "memory_pressure": "The system has 8589934592 (524288 pages with a page size of 16384).\n\nStats: \nPages free: 118643 \nPages purgeable: 19 \nPages purged: 36443116 \n\nSwap I/O:\nSwapins: 11932587 \nSwapouts: 14274840 \n\nPage Q counts:\nPages active: 81937 \nPages inactive: 72129 \nPages speculative: 2160 \nPages throttled: 0 \nPages wired down: 118116 \n\nCompressor Stats:\nPages used by compressor: 94627 \nPages decompressed: 448810156 \nPages compressed: 490613516 \n\nFile I/O:\nPageins: 73861395 \nPageouts: 1809588 \n\nSystem-wide memory free percentage: 56%\n",
+      "sysctl vm.swapusage": "vm.swapusage: total = 8192.00M  used = 7207.19M  free = 984.81M  (encrypted)\n"
+    },
+    "source_sha256": {
+      "scripts/benchmark_phonon.py": "730c043689d718b29f5e7a47d0929ff7587b41b8d5841c971446d783cc21df62",
+      "scripts/benchmark_moonshine_handler.py": "4cf4604e054a945510d3c2a4c6a57ea493d6ac8d548c2b81edeeb097f14213f1",
+      "src/speech_to_speech/STT/streaming_handler.py": "62e6fea6abeea356291fd3b8b56c1f584c13dedb0793813085d82c5f29aed33c",
+      "src/speech_to_speech/STT/parakeet_tdt_handler.py": "481a844aef93e0f8252b38be24bc6de1743fef9217213849c54f4f6edeb7228a",
+      "src/speech_to_speech/STT/mlx_audio_whisper_handler.py": "143440fa3cd03cd8ed7522959a6bf90bab03925537f5aaafb9a6b616fa194488"
+    },
+    "model_revision": "77fa3f52b482ec80d086df55f893065a9baab172",
+    "model_files": [
+      {
+        "name": ".gitattributes",
+        "bytes": 1519,
+        "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361"
+      },
+      {
+        "name": "README.md",
+        "bytes": 2812,
+        "sha256": "d68f867f75885b5fb22073dee9befb9bcb5586a4ba1cdfe39153f0335b2ca9e4"
+      },
+      {
+        "name": "added_tokens.json",
+        "bytes": 34604,
+        "sha256": "9715fd2243b6f06a5858b5e32950d2853f73dd5bc201aafcf76f5082a2d8acd1"
+      },
+      {
+        "name": "config.json",
+        "bytes": 2440,
+        "sha256": "cf7def105e7cc5ba77a0c8fae7e97aac1ca896b70b288dec3d64fad6d9c08f7a"
+      },
+      {
+        "name": "generation_config.json",
+        "bytes": 3747,
+        "sha256": "a5d5325911f16e74001a72fa13d6e208eee51548f994646de1f4b4cc8b35b512"
+      },
+      {
+        "name": "merges.txt",
+        "bytes": 493869,
+        "sha256": "2df2990a395e35e8dfbc7511e08c12d56018d8d04691e0133e5d63b21e154dc6"
+      },
+      {
+        "name": "model.safetensors",
+        "bytes": 74385959,
+        "sha256": "1267601753d2996d68dc065d1de786895a7ad9a874d1d3548a5274c1bc067444"
+      },
+      {
+        "name": "model.safetensors.index.json",
+        "bytes": 10784,
+        "sha256": "093aa44f9a4ef9f403f29eb03f079f4c252cd78037fd4c1aced4c63625776b43"
+      },
+      {
+        "name": "normalizer.json",
+        "bytes": 52666,
+        "sha256": "bf1c507dc8724ca9cf9903640dacfb69dae2f00edee4f21ceba106a7392f26dd"
+      },
+      {
+        "name": "preprocessor_config.json",
+        "bytes": 184990,
+        "sha256": "9b5cd03a36fbb8a627c64d98a5b5b126ead95a77720723944487311f0110b666"
+      },
+      {
+        "name": "special_tokens_map.json",
+        "bytes": 2194,
+        "sha256": "e67ae3a0aaa99abcd9f187138e12db1f65c16a14761c50ef10eef2c174a7a691"
+      },
+      {
+        "name": "tokenizer.json",
+        "bytes": 2480466,
+        "sha256": "27fc476bfe7f17299480be2273fc0608e4d5a99aba2ab5dec5374b4482d1a566"
+      },
+      {
+        "name": "tokenizer_config.json",
+        "bytes": 282683,
+        "sha256": "2a4c4281cf9f51ac6ccc406fdc711a087afe6530f671fa7b80953edc498275ce"
+      },
+      {
+        "name": "vocab.json",
+        "bytes": 835550,
+        "sha256": "8f680bba319e01a653d2e8a5dbc17a9157179e0576e6ce74ce0c06356c6e24f9"
+      }
+    ],
+    "processor": {
+      "repo": "openai/whisper-tiny",
+      "revision": "169d4a4341b33bc18d8881c4b69c2e104e1cc0af"
+    },
+    "command": [
+      "/Users/jackboylan/workspace/speech-to-speech-phonon/.venv/bin/python",
+      "scripts/benchmark_phonon.py",
+      "--manifest",
+      "progress/evaluations/librispeech-mini/manifest.jsonl",
+      "--backend",
+      "mlx-audio-whisper",
+      "--device",
+      "mps",
+      "--threads",
+      "4",
+      "--output",
+      "progress/evaluations/mac-whisper-current/whisper-tiny-current.json",
+      "--log-level",
+      "debug",
+      "--model",
+      "mlx-community/whisper-tiny-asr-fp16"
+    ],
+    "exit_code": 0,
+    "result": {
+      "successful_clips": 10,
+      "failed_clips": 0,
+      "warmup_failures": 0,
+      "median_first_partial_s": 3.9720332919969223,
+      "median_final_latency_s": 6.008112833005725,
+      "word_errors_total": 448,
+      "reference_words_total": 254,
+      "wer": 1.763779527559055,
+      "error": null
+    },
+    "resources_after": {
+      "time": 1790891071.7097101,
+      "uptime": "22:44  up 5 days,  6:05, 6 users, load averages: 3.62 3.48 4.14\n",
+      "df -h /": "Filesystem        Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk3s1s1   228Gi    13Gi    18Gi    43%    484k  185M    0%   /\n",
+      "memory_pressure": "The system has 8589934592 (524288 pages with a page size of 16384).\n\nStats: \nPages free: 51822 \nPages purgeable: 2 \nPages purged: 36453217 \n\nSwap I/O:\nSwapins: 11964270 \nSwapouts: 14274840 \n\nPage Q counts:\nPages active: 89701 \nPages inactive: 91972 \nPages speculative: 1231 \nPages throttled: 0 \nPages wired down: 132153 \n\nCompressor Stats:\nPages used by compressor: 120733 \nPages decompressed: 449741724 \nPages compressed: 491667763 \n\nFile I/O:\nPageins: 73946444 \nPageouts: 1809744 \n\nSystem-wide memory free percentage: 47%\n",
+      "sysctl vm.swapusage": "vm.swapusage: total = 8192.00M  used = 6703.12M  free = 1488.88M  (encrypted)\n"
+    }
+  },
+  {
+    "case": {
+      "id": "whisper-turbo-current",
+      "backend": "mlx-audio-whisper",
+      "model": "mlx-community/whisper-large-v3-turbo-asr-fp16",
+      "device": "mps"
+    },
+    "resources_before": {
+      "time": 1790891071.722622,
+      "uptime": "22:44  up 5 days,  6:05, 6 users, load averages: 3.62 3.48 4.14\n",
+      "df -h /": "Filesystem        Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk3s1s1   228Gi    13Gi    18Gi    43%    484k  185M    0%   /\n",
+      "memory_pressure": "The system has 8589934592 (524288 pages with a page size of 16384).\n\nStats: \nPages free: 51737 \nPages purgeable: 2 \nPages purged: 36453217 \n\nSwap I/O:\nSwapins: 11964270 \nSwapouts: 14274840 \n\nPage Q counts:\nPages active: 89804 \nPages inactive: 91974 \nPages speculative: 1233 \nPages throttled: 0 \nPages wired down: 132153 \n\nCompressor Stats:\nPages used by compressor: 120711 \nPages decompressed: 449741843 \nPages compressed: 491667763 \n\nFile I/O:\nPageins: 73946451 \nPageouts: 1809744 \n\nSystem-wide memory free percentage: 47%\n",
+      "sysctl vm.swapusage": "vm.swapusage: total = 8192.00M  used = 6703.12M  free = 1488.88M  (encrypted)\n"
+    },
+    "source_sha256": {
+      "scripts/benchmark_phonon.py": "730c043689d718b29f5e7a47d0929ff7587b41b8d5841c971446d783cc21df62",
+      "scripts/benchmark_moonshine_handler.py": "4cf4604e054a945510d3c2a4c6a57ea493d6ac8d548c2b81edeeb097f14213f1",
+      "src/speech_to_speech/STT/streaming_handler.py": "62e6fea6abeea356291fd3b8b56c1f584c13dedb0793813085d82c5f29aed33c",
+      "src/speech_to_speech/STT/parakeet_tdt_handler.py": "481a844aef93e0f8252b38be24bc6de1743fef9217213849c54f4f6edeb7228a",
+      "src/speech_to_speech/STT/mlx_audio_whisper_handler.py": "143440fa3cd03cd8ed7522959a6bf90bab03925537f5aaafb9a6b616fa194488"
+    },
+    "model_revision": "624c19c9af5603fa73b83bce14d4aeea96156d18",
+    "model_files": [
+      {
+        "name": ".gitattributes",
+        "bytes": 1519,
+        "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361"
+      },
+      {
+        "name": "README.md",
+        "bytes": 1057,
+        "sha256": "654c778494779fcf4b9bd4799ea2060cc931c516328b0408838604d5dc89bd3d"
+      },
+      {
+        "name": "added_tokens.json",
+        "bytes": 34648,
+        "sha256": "3c51f66c4c21f9e126970078f11ae77a78c74aee8df606ee9daba86e467108e0"
+      },
+      {
+        "name": "config.json",
+        "bytes": 1301,
+        "sha256": "47ef28115e4b7e08c604546cc98eb1ead8ff72152cfaeb5d7bcb7ef1640a5bdd"
+      },
+      {
+        "name": "generation_config.json",
+        "bytes": 3772,
+        "sha256": "cce11bfe3aaa6ae9e072ea2637caaec8795e68d9b67e655a5af16ee509681a4c"
+      },
+      {
+        "name": "merges.txt",
+        "bytes": 493869,
+        "sha256": "2df2990a395e35e8dfbc7511e08c12d56018d8d04691e0133e5d63b21e154dc6"
+      },
+      {
+        "name": "model.safetensors",
+        "bytes": 1613977443,
+        "sha256": "a76ee3af9c01b616ab7caf1eed663dceb7d68e9dc62c990dac48112db6e57e34"
+      },
+      {
+        "name": "model.safetensors.index.json",
+        "bytes": 37633,
+        "sha256": "9cf894da1061ccc1657c6dabf1fa19dfcf1f0603df4194ab4fb913a554da789d"
+      },
+      {
+        "name": "normalizer.json",
+        "bytes": 52666,
+        "sha256": "bf1c507dc8724ca9cf9903640dacfb69dae2f00edee4f21ceba106a7392f26dd"
+      },
+      {
+        "name": "preprocessor_config.json",
+        "bytes": 340,
+        "sha256": "7ccc62c6f2765af1f3b46c00c9b5894426835a05021c8b9c01eecb6dfb542711"
+      },
+      {
+        "name": "special_tokens_map.json",
+        "bytes": 2186,
+        "sha256": "baea4ea09372eb4fca86b4e4346139fd73cb807d5087e9de0948e971739c3e74"
+      },
+      {
+        "name": "tokenizer.json",
+        "bytes": 2710337,
+        "sha256": "297b13372ac43916285644fb9687add3cc62ee2a1adb60da3dc25cc94c1871fd"
+      },
+      {
+        "name": "tokenizer_config.json",
+        "bytes": 282843,
+        "sha256": "844b642c73a91359722f47b35705f7174686df33d252695d8572cf9ac03a6389"
+      },
+      {
+        "name": "vocab.json",
+        "bytes": 1036558,
+        "sha256": "e2aa043ef015641d363d8288e7c241c85e36a5c761fb303598e0710233344387"
+      }
+    ],
+    "processor": {
+      "repo": "openai/whisper-large-v3",
+      "revision": "06f233fe06e710322aca913c1bc4249a0d71fce1"
+    },
+    "command": [
+      "/Users/jackboylan/workspace/speech-to-speech-phonon/.venv/bin/python",
+      "scripts/benchmark_phonon.py",
+      "--manifest",
+      "progress/evaluations/librispeech-mini/manifest.jsonl",
+      "--backend",
+      "mlx-audio-whisper",
+      "--device",
+      "mps",
+      "--threads",
+      "4",
+      "--output",
+      "progress/evaluations/mac-whisper-current/whisper-turbo-current.json",
+      "--log-level",
+      "debug",
+      "--model",
+      "mlx-community/whisper-large-v3-turbo-asr-fp16"
+    ],
+    "exit_code": 0,
+    "result": {
+      "successful_clips": 10,
+      "failed_clips": 0,
+      "warmup_failures": 0,
+      "median_first_partial_s": 7.416456750506768,
+      "median_final_latency_s": 2.987020083499374,
+      "word_errors_total": 15,
+      "reference_words_total": 254,
+      "wer": 0.05905511811023622,
+      "error": null
+    },
+    "resources_after": {
+      "time": 1790891289.227305,
+      "uptime": "22:48  up 5 days,  6:09, 6 users, load averages: 20.02 7.69 5.55\n",
+      "df -h /": "Filesystem        Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk3s1s1   228Gi    13Gi    14Gi    49%    484k  147M    0%   /\n",
+      "memory_pressure": "The system has 8589934592 (524288 pages with a page size of 16384).\n\nStats: \nPages free: 118832 \nPages purgeable: 2 \nPages purged: 36629750 \n\nSwap I/O:\nSwapins: 12150760 \nSwapouts: 14583068 \n\nPage Q counts:\nPages active: 50649 \nPages inactive: 44911 \nPages speculative: 4926 \nPages throttled: 0 \nPages wired down: 199214 \n\nCompressor Stats:\nPages used by compressor: 69080 \nPages decompressed: 455983279 \nPages compressed: 498649935 \n\nFile I/O:\nPageins: 74788387 \nPageouts: 1812723 \n\nSystem-wide memory free percentage: 44%\n",
+      "sysctl vm.swapusage": "vm.swapusage: total = 10240.00M  used = 8609.06M  free = 1630.94M  (encrypted)\n"
+    }
+  }
+]

@@ -1,0 +1,24 @@
+{
+  "initial": {
+    "base_commit": "c80aa28",
+    "source_sha256": {
+      "scripts/benchmark_phonon.py": "730c043689d718b29f5e7a47d0929ff7587b41b8d5841c971446d783cc21df62",
+      "scripts/benchmark_moonshine_handler.py": "4cf4604e054a945510d3c2a4c6a57ea493d6ac8d548c2b81edeeb097f14213f1",
+      "src/speech_to_speech/STT/streaming_handler.py": "62e6fea6abeea356291fd3b8b56c1f584c13dedb0793813085d82c5f29aed33c",
+      "src/speech_to_speech/STT/parakeet_tdt_handler.py": "481a844aef93e0f8252b38be24bc6de1743fef9217213849c54f4f6edeb7228a",
+      "src/speech_to_speech/STT/mlx_audio_whisper_handler.py": "a1ce6444990bd02edf7d884ce583604f698d4b14a455509db2d2b49258faf541"
+    },
+    "note": "Benchmark extensions were uncommitted during measurement; hashes match files published with this evidence."
+  },
+  "followups": {
+    "base_commit": "b456999",
+    "source_sha256": {
+      "scripts/benchmark_phonon.py": "730c043689d718b29f5e7a47d0929ff7587b41b8d5841c971446d783cc21df62",
+      "scripts/benchmark_moonshine_handler.py": "4cf4604e054a945510d3c2a4c6a57ea493d6ac8d548c2b81edeeb097f14213f1",
+      "src/speech_to_speech/STT/streaming_handler.py": "62e6fea6abeea356291fd3b8b56c1f584c13dedb0793813085d82c5f29aed33c",
+      "src/speech_to_speech/STT/parakeet_tdt_handler.py": "481a844aef93e0f8252b38be24bc6de1743fef9217213849c54f4f6edeb7228a",
+      "src/speech_to_speech/STT/mlx_audio_whisper_handler.py": "143440fa3cd03cd8ed7522959a6bf90bab03925537f5aaafb9a6b616fa194488"
+    },
+    "note": "Two processor aliases changed; benchmark measurement and Moonshine bridge stayed frozen. Driver metadata contains per-case hashes."
+  }
+}

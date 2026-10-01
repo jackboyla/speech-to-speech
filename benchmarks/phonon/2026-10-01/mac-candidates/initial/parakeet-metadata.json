@@ -1,0 +1,90 @@
+{
+  "case": {
+    "id": "parakeet",
+    "backend": "parakeet-tdt",
+    "model": "mlx-community/parakeet-tdt-0.6b-v3",
+    "device": "mps"
+  },
+  "resources_before": {
+    "time": 1790889188.798304,
+    "uptime": "22:13  up 5 days,  5:34, 6 users, load averages: 3.98 3.77 3.40\n",
+    "df -h /": "Filesystem        Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk3s1s1   228Gi    13Gi    17Gi    44%    484k  177M    0%   /\n",
+    "memory_pressure": "The system has 8589934592 (524288 pages with a page size of 16384).\n\nStats: \nPages free: 124259 \nPages purgeable: 2 \nPages purged: 35863566 \n\nSwap I/O:\nSwapins: 9205719 \nSwapouts: 11052614 \n\nPage Q counts:\nPages active: 62113 \nPages inactive: 56226 \nPages speculative: 5575 \nPages throttled: 0 \nPages wired down: 110245 \n\nCompressor Stats:\nPages used by compressor: 129194 \nPages decompressed: 421199846 \nPages compressed: 459773910 \n\nFile I/O:\nPageins: 70262732 \nPageouts: 1790107 \n\nSystem-wide memory free percentage: 50%\n",
+    "sysctl vm.swapusage": "vm.swapusage: total = 8192.00M  used = 7021.31M  free = 1170.69M  (encrypted)\n"
+  },
+  "model_revision": "ed2b7e8c15f9aaa0b5772e2efb986255eaef7e15",
+  "model_files": [
+    {
+      "name": ".gitattributes",
+      "bytes": 1519,
+      "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361"
+    },
+    {
+      "name": "README.md",
+      "bytes": 1081,
+      "sha256": "724e3ba46903986ff6caeb8fddb7495c06b5a7a8d908f11e43cc0a7e136b5e23"
+    },
+    {
+      "name": "config.json",
+      "bytes": 244093,
+      "sha256": "f320f1292511f34ec47f513755fe20fd01dbfc09a925d42730e66059a6e1ef4c"
+    },
+    {
+      "name": "model.safetensors",
+      "bytes": 2508288736,
+      "sha256": "05e01c7f396c298cf7d23f61da7b504adeab698f0aaeafd9c82d198625464592"
+    },
+    {
+      "name": "tokenizer.model",
+      "bytes": 360916,
+      "sha256": "eacec2b0a77f336d4a2ca4a25a7047575d3c2b74de47e997f4c205126ed3135e"
+    },
+    {
+      "name": "tokenizer.vocab",
+      "bytes": 101024,
+      "sha256": "41130ff456706304a1adec782ccc9e003c4d417e8e324353d281be958cac4e17"
+    },
+    {
+      "name": "vocab.txt",
+      "bytes": 46772,
+      "sha256": "3cde1409fd78783a79b29ed4d32da57c746993856f7c8263bcb905d2e5839db7"
+    }
+  ],
+  "command": [
+    "/Users/jackboylan/workspace/speech-to-speech-phonon/.venv/bin/python",
+    "scripts/benchmark_phonon.py",
+    "--manifest",
+    "progress/evaluations/librispeech-mini/manifest.jsonl",
+    "--backend",
+    "parakeet-tdt",
+    "--device",
+    "mps",
+    "--threads",
+    "4",
+    "--output",
+    "progress/evaluations/mac-candidate-sweep/parakeet.json",
+    "--log-level",
+    "debug",
+    "--model",
+    "mlx-community/parakeet-tdt-0.6b-v3"
+  ],
+  "exit_code": 0,
+  "result": {
+    "successful_clips": 10,
+    "failed_clips": 0,
+    "warmup_failures": 0,
+    "median_first_partial_s": 2.458370187494438,
+    "median_final_latency_s": 3.486059270988335,
+    "word_errors_total": 7,
+    "reference_words_total": 254,
+    "wer": 0.027559055118110236,
+    "error": null
+  },
+  "resources_after": {
+    "time": 1790889493.045098,
+    "uptime": "22:18  up 5 days,  5:39, 6 users, load averages: 3.48 3.28 3.25\n",
+    "df -h /": "Filesystem        Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk3s1s1   228Gi    13Gi    11Gi    54%    484k  120M    0%   /\n",
+    "memory_pressure": "The system has 8589934592 (524288 pages with a page size of 16384).\n\nStats: \nPages free: 146489 \nPages purgeable: 122 \nPages purged: 36023932 \n\nSwap I/O:\nSwapins: 10954694 \nSwapouts: 13248246 \n\nPage Q counts:\nPages active: 72887 \nPages inactive: 64440 \nPages speculative: 7397 \nPages throttled: 0 \nPages wired down: 129791 \n\nCompressor Stats:\nPages used by compressor: 66585 \nPages decompressed: 430223664 \nPages compressed: 469784367 \n\nFile I/O:\nPageins: 71353920 \nPageouts: 1792711 \n\nSystem-wide memory free percentage: 59%\n",
+    "sysctl vm.swapusage": "vm.swapusage: total = 14336.00M  used = 13912.81M  free = 423.19M  (encrypted)\n"
+  }
+}

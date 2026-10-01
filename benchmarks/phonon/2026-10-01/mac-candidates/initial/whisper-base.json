@@ -1,0 +1,31 @@
+{
+  "backend": "mlx-audio-whisper",
+  "model": "mlx-community/whisper-base-mlx",
+  "machine": "Jacks-MacBook-Air.local",
+  "platform": "macOS-27.0-arm64-arm-64bit",
+  "python": "3.11.14 (main, Oct 28 2025, 12:11:54) [Clang 20.1.4 ]",
+  "torch": "2.14.1",
+  "device": "mps",
+  "threads": 4,
+  "chunk_ms": 32,
+  "partial_interval_s": 0.5,
+  "manifest": "/Users/jackboylan/workspace/speech-to-speech-phonon/progress/evaluations/librispeech-mini/manifest.jsonl",
+  "manifest_sha256": "1dc6cce2121d065cc239da569d1ab2f023fd3cf867e7aaf6555cb2b17fd750ce",
+  "benchmark_sha256": "730c043689d718b29f5e7a47d0929ff7587b41b8d5841c971446d783cc21df62",
+  "cuda_visible_devices": null,
+  "accuracy_normalization": "casefold, remove punctuation, split whitespace; word edit distance",
+  "package_versions": {
+    "numpy": "2.4.6",
+    "soundfile": "0.14.0",
+    "soxr": "1.1.0",
+    "websockets": "17.1",
+    "nano-parakeet": null,
+    "mlx": "0.32.3",
+    "mlx-audio": "0.5.7",
+    "moonshine-voice": "0.1.5"
+  },
+  "warmup": [],
+  "clips": [],
+  "scope": "handler only; no VAD/LLM/TTS; CPU/RSS exclude external Phonon server",
+  "error": "OSError: Can't load feature extractor for 'openai/whisper-large-v3'. If you were trying to load it from 'https://huggingface.co/models', make sure you don't have a local directory with the same name. Otherwise, make sure 'openai/whisper-large-v3' is the correct path to a directory containing a preprocessor_config.json file"
+}

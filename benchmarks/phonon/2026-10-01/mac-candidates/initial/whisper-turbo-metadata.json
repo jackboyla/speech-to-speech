@@ -1,0 +1,75 @@
+{
+  "case": {
+    "id": "whisper-turbo",
+    "backend": "mlx-audio-whisper",
+    "model": "mlx-community/whisper-large-v3-turbo",
+    "device": "mps"
+  },
+  "resources_before": {
+    "time": 1790889147.752372,
+    "uptime": "22:12  up 5 days,  5:33, 6 users, load averages: 4.06 3.77 3.38\n",
+    "df -h /": "Filesystem        Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk3s1s1   228Gi    13Gi    19Gi    41%    484k  203M    0%   /\n",
+    "memory_pressure": "The system has 8589934592 (524288 pages with a page size of 16384).\n\nStats: \nPages free: 65377 \nPages purgeable: 874 \nPages purged: 35843549 \n\nSwap I/O:\nSwapins: 9198302 \nSwapouts: 10987066 \n\nPage Q counts:\nPages active: 57239 \nPages inactive: 55376 \nPages speculative: 2739 \nPages throttled: 0 \nPages wired down: 120756 \n\nCompressor Stats:\nPages used by compressor: 186125 \nPages decompressed: 420488156 \nPages compressed: 458761343 \n\nFile I/O:\nPageins: 69970216 \nPageouts: 1789812 \n\nSystem-wide memory free percentage: 36%\n",
+    "sysctl vm.swapusage": "vm.swapusage: total = 7168.00M  used = 6112.69M  free = 1055.31M  (encrypted)\n"
+  },
+  "model_revision": "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb",
+  "model_files": [
+    {
+      "name": ".gitattributes",
+      "bytes": 1519,
+      "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361"
+    },
+    {
+      "name": "README.md",
+      "bytes": 359,
+      "sha256": "78f2d3dc65072211d957fc1b646c2d96e8e8f96dd45ceb2ac5f2643d0c5c05da"
+    },
+    {
+      "name": "config.json",
+      "bytes": 268,
+      "sha256": "b34fc29e4e11e0a25e812775dd67f4dd16fc2c8eb43d28ae25ff7d660ecb6379"
+    },
+    {
+      "name": "weights.safetensors",
+      "bytes": 1613977612,
+      "sha256": "951ed3fc1203e6a62467abb2144a96ce7eafca8fa77e3704fdb8635ff3e7f8a6"
+    }
+  ],
+  "command": [
+    "/Users/jackboylan/workspace/speech-to-speech-phonon/.venv/bin/python",
+    "scripts/benchmark_phonon.py",
+    "--manifest",
+    "progress/evaluations/librispeech-mini/manifest.jsonl",
+    "--backend",
+    "mlx-audio-whisper",
+    "--device",
+    "mps",
+    "--threads",
+    "4",
+    "--output",
+    "progress/evaluations/mac-candidate-sweep/whisper-turbo.json",
+    "--log-level",
+    "debug",
+    "--model",
+    "mlx-community/whisper-large-v3-turbo"
+  ],
+  "exit_code": 1,
+  "result": {
+    "successful_clips": null,
+    "failed_clips": null,
+    "warmup_failures": null,
+    "median_first_partial_s": null,
+    "median_final_latency_s": null,
+    "word_errors_total": null,
+    "reference_words_total": null,
+    "wer": null,
+    "error": "OSError: Can't load feature extractor for 'openai/whisper-large-v3'. If you were trying to load it from 'https://huggingface.co/models', make sure you don't have a local directory with the same name. Otherwise, make sure 'openai/whisper-large-v3' is the correct path to a directory containing a preprocessor_config.json file"
+  },
+  "resources_after": {
+    "time": 1790889188.783797,
+    "uptime": "22:13  up 5 days,  5:34, 6 users, load averages: 3.98 3.77 3.40\n",
+    "df -h /": "Filesystem        Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk3s1s1   228Gi    13Gi    17Gi    44%    484k  177M    0%   /\n",
+    "memory_pressure": "The system has 8589934592 (524288 pages with a page size of 16384).\n\nStats: \nPages free: 124517 \nPages purgeable: 2 \nPages purged: 35863566 \n\nSwap I/O:\nSwapins: 9205719 \nSwapouts: 11052614 \n\nPage Q counts:\nPages active: 61929 \nPages inactive: 56221 \nPages speculative: 5461 \nPages throttled: 0 \nPages wired down: 110245 \n\nCompressor Stats:\nPages used by compressor: 129235 \nPages decompressed: 421199684 \nPages compressed: 459773910 \n\nFile I/O:\nPageins: 70262630 \nPageouts: 1790107 \n\nSystem-wide memory free percentage: 50%\n",
+    "sysctl vm.swapusage": "vm.swapusage: total = 8192.00M  used = 7021.31M  free = 1170.69M  (encrypted)\n"
+  }
+}

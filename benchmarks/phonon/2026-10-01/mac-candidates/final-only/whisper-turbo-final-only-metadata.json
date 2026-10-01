@@ -1,0 +1,89 @@
+{
+  "case": {
+    "id": "whisper-turbo-final-only",
+    "backend": "mlx-audio-whisper",
+    "model": "mlx-community/whisper-large-v3-turbo",
+    "device": "mps",
+    "partial_interval": 1000
+  },
+  "resources_before": {
+    "time": 1790890726.607432,
+    "uptime": "22:38  up 5 days, 6 hrs, 6 users, load averages: 4.17 4.29 4.73\n",
+    "df -h /": "Filesystem        Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk3s1s1   228Gi    13Gi    18Gi    43%    484k  185M    0%   /\n",
+    "memory_pressure": "The system has 8589934592 (524288 pages with a page size of 16384).\n\nStats: \nPages free: 92971 \nPages purgeable: 2202 \nPages purged: 36394636 \n\nSwap I/O:\nSwapins: 11881486 \nSwapouts: 14198428 \n\nPage Q counts:\nPages active: 75711 \nPages inactive: 70383 \nPages speculative: 4297 \nPages throttled: 0 \nPages wired down: 121712 \n\nCompressor Stats:\nPages used by compressor: 122538 \nPages decompressed: 446238661 \nPages compressed: 487718359 \n\nFile I/O:\nPageins: 73443438 \nPageouts: 1809075 \n\nSystem-wide memory free percentage: 49%\n",
+    "sysctl vm.swapusage": "vm.swapusage: total = 8192.00M  used = 6813.25M  free = 1378.75M  (encrypted)\n"
+  },
+  "source_sha256": {
+    "scripts/benchmark_phonon.py": "730c043689d718b29f5e7a47d0929ff7587b41b8d5841c971446d783cc21df62",
+    "scripts/benchmark_moonshine_handler.py": "4cf4604e054a945510d3c2a4c6a57ea493d6ac8d548c2b81edeeb097f14213f1",
+    "src/speech_to_speech/STT/streaming_handler.py": "62e6fea6abeea356291fd3b8b56c1f584c13dedb0793813085d82c5f29aed33c",
+    "src/speech_to_speech/STT/parakeet_tdt_handler.py": "481a844aef93e0f8252b38be24bc6de1743fef9217213849c54f4f6edeb7228a",
+    "src/speech_to_speech/STT/mlx_audio_whisper_handler.py": "143440fa3cd03cd8ed7522959a6bf90bab03925537f5aaafb9a6b616fa194488"
+  },
+  "model_revision": "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb",
+  "model_files": [
+    {
+      "name": ".gitattributes",
+      "bytes": 1519,
+      "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361"
+    },
+    {
+      "name": "README.md",
+      "bytes": 359,
+      "sha256": "78f2d3dc65072211d957fc1b646c2d96e8e8f96dd45ceb2ac5f2643d0c5c05da"
+    },
+    {
+      "name": "config.json",
+      "bytes": 268,
+      "sha256": "b34fc29e4e11e0a25e812775dd67f4dd16fc2c8eb43d28ae25ff7d660ecb6379"
+    },
+    {
+      "name": "weights.safetensors",
+      "bytes": 1613977612,
+      "sha256": "951ed3fc1203e6a62467abb2144a96ce7eafca8fa77e3704fdb8635ff3e7f8a6"
+    }
+  ],
+  "processor": {
+    "repo": "openai/whisper-large-v3",
+    "revision": "06f233fe06e710322aca913c1bc4249a0d71fce1"
+  },
+  "command": [
+    "/Users/jackboylan/workspace/speech-to-speech-phonon/.venv/bin/python",
+    "scripts/benchmark_phonon.py",
+    "--manifest",
+    "progress/evaluations/librispeech-mini/manifest.jsonl",
+    "--backend",
+    "mlx-audio-whisper",
+    "--device",
+    "mps",
+    "--threads",
+    "4",
+    "--output",
+    "progress/evaluations/mac-whisper-final-only/whisper-turbo-final-only.json",
+    "--log-level",
+    "debug",
+    "--model",
+    "mlx-community/whisper-large-v3-turbo",
+    "--partial-interval",
+    "1000"
+  ],
+  "exit_code": 0,
+  "result": {
+    "successful_clips": 10,
+    "failed_clips": 0,
+    "warmup_failures": 0,
+    "median_first_partial_s": null,
+    "median_final_latency_s": 1.4656356045015855,
+    "word_errors_total": 15,
+    "reference_words_total": 254,
+    "wer": 0.05905511811023622,
+    "error": null
+  },
+  "resources_after": {
+    "time": 1790890868.916103,
+    "uptime": "22:41  up 5 days,  6:02, 6 users, load averages: 2.48 3.55 4.36\n",
+    "df -h /": "Filesystem        Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk3s1s1   228Gi    13Gi    18Gi    43%    484k  185M    0%   /\n",
+    "memory_pressure": "The system has 8589934592 (524288 pages with a page size of 16384).\n\nStats: \nPages free: 159558 \nPages purgeable: 2 \nPages purged: 36442655 \n\nSwap I/O:\nSwapins: 11926508 \nSwapouts: 14274840 \n\nPage Q counts:\nPages active: 71348 \nPages inactive: 71338 \nPages speculative: 3664 \nPages throttled: 0 \nPages wired down: 91344 \n\nCompressor Stats:\nPages used by compressor: 90360 \nPages decompressed: 448539617 \nPages compressed: 490241714 \n\nFile I/O:\nPageins: 73822495 \nPageouts: 1809532 \n\nSystem-wide memory free percentage: 62%\n",
+    "sysctl vm.swapusage": "vm.swapusage: total = 8192.00M  used = 7311.19M  free = 880.81M  (encrypted)\n"
+  }
+}

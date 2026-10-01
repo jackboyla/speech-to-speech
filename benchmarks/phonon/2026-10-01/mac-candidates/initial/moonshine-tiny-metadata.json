@@ -1,0 +1,53 @@
+{
+  "case": {
+    "id": "moonshine-tiny",
+    "backend": "moonshine",
+    "model": "tiny-streaming",
+    "device": "cpu"
+  },
+  "resources_before": {
+    "time": 1790888575.33882,
+    "uptime": "22:02  up 5 days,  5:24, 6 users, load averages: 2.97 3.04 2.91\n",
+    "df -h /": "Filesystem        Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk3s1s1   228Gi    13Gi    20Gi    40%    484k  212M    0%   /\n",
+    "memory_pressure": "The system has 8589934592 (524288 pages with a page size of 16384).\n\nStats: \nPages free: 3902 \nPages purgeable: 2 \nPages purged: 35591081 \n\nSwap I/O:\nSwapins: 9144944 \nSwapouts: 10908106 \n\nPage Q counts:\nPages active: 85479 \nPages inactive: 81389 \nPages speculative: 2991 \nPages throttled: 0 \nPages wired down: 129380 \n\nCompressor Stats:\nPages used by compressor: 184471 \nPages decompressed: 415664124 \nPages compressed: 453255875 \n\nFile I/O:\nPageins: 69483196 \nPageouts: 1788593 \n\nSystem-wide memory free percentage: 35%\n",
+    "sysctl vm.swapusage": "vm.swapusage: total = 7168.00M  used = 5711.12M  free = 1456.88M  (encrypted)\n"
+  },
+  "model_path": "/Users/jackboylan/Library/Caches/moonshine_voice/download.moonshine.ai/model/tiny-streaming-en/quantized_26_08_21",
+  "command": [
+    "/Users/jackboylan/workspace/speech-to-speech-phonon/.venv/bin/python",
+    "scripts/benchmark_phonon.py",
+    "--manifest",
+    "progress/evaluations/librispeech-mini/manifest.jsonl",
+    "--backend",
+    "moonshine",
+    "--device",
+    "cpu",
+    "--threads",
+    "4",
+    "--output",
+    "progress/evaluations/mac-candidate-sweep/moonshine-tiny.json",
+    "--log-level",
+    "debug",
+    "--model",
+    "tiny-streaming"
+  ],
+  "exit_code": 0,
+  "result": {
+    "successful_clips": 10,
+    "failed_clips": 0,
+    "warmup_failures": 0,
+    "median_first_partial_s": 1.0887907705036923,
+    "median_final_latency_s": 0.04962989600608125,
+    "word_errors_total": 30,
+    "reference_words_total": 254,
+    "wer": 0.11811023622047244,
+    "error": null
+  },
+  "resources_after": {
+    "time": 1790888697.4623418,
+    "uptime": "22:04  up 5 days,  5:26, 6 users, load averages: 3.06 3.11 2.95\n",
+    "df -h /": "Filesystem        Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk3s1s1   228Gi    13Gi    20Gi    40%    484k  212M    0%   /\n",
+    "memory_pressure": "The system has 8589934592 (524288 pages with a page size of 16384).\n\nStats: \nPages free: 30152 \nPages purgeable: 2 \nPages purged: 35659741 \n\nSwap I/O:\nSwapins: 9167030 \nSwapouts: 10937926 \n\nPage Q counts:\nPages active: 94528 \nPages inactive: 94201 \nPages speculative: 655 \nPages throttled: 0 \nPages wired down: 107670 \n\nCompressor Stats:\nPages used by compressor: 160406 \nPages decompressed: 416686146 \nPages compressed: 454360774 \n\nFile I/O:\nPageins: 69588363 \nPageouts: 1788881 \n\nSystem-wide memory free percentage: 44%\n",
+    "sysctl vm.swapusage": "vm.swapusage: total = 7168.00M  used = 5840.94M  free = 1327.06M  (encrypted)\n"
+  }
+}

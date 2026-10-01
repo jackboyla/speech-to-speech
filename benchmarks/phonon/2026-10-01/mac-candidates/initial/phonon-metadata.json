@@ -1,0 +1,137 @@
+{
+  "case": {
+    "id": "phonon",
+    "backend": "phonon",
+    "device": "mps"
+  },
+  "resources_before": {
+    "time": 1790889493.129073,
+    "uptime": "22:18  up 5 days,  5:39, 6 users, load averages: 3.84 3.36 3.28\n",
+    "df -h /": "Filesystem        Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk3s1s1   228Gi    13Gi    11Gi    54%    484k  120M    0%   /\n",
+    "memory_pressure": "The system has 8589934592 (524288 pages with a page size of 16384).\n\nStats: \nPages free: 142699 \nPages purgeable: 154 \nPages purged: 36023932 \n\nSwap I/O:\nSwapins: 10956605 \nSwapouts: 13248246 \n\nPage Q counts:\nPages active: 74794 \nPages inactive: 66332 \nPages speculative: 7547 \nPages throttled: 0 \nPages wired down: 129708 \n\nCompressor Stats:\nPages used by compressor: 66514 \nPages decompressed: 430226727 \nPages compressed: 469784367 \n\nFile I/O:\nPageins: 71354411 \nPageouts: 1792711 \n\nSystem-wide memory free percentage: 59%\n",
+    "sysctl vm.swapusage": "vm.swapusage: total = 14336.00M  used = 13864.81M  free = 471.19M  (encrypted)\n"
+  },
+  "server_health_start": {
+    "status": "ok",
+    "model": "FermionResearch/Phonon-2",
+    "kind": "speech",
+    "version": "0.2.7",
+    "repo": "FermionResearch/Phonon-2",
+    "profile": "five-value",
+    "sha256": "98125795b6dda72f5c6eee9ba33d19815df65dcb18b50a357bf9f73c9935309e",
+    "sha256_short": "98125795",
+    "download_bytes": 163515201,
+    "model_dir": "/Users/jackboylan/.cache/fermion/speech/FermionResearch__Phonon-2/model_phonon2_c4c_int6",
+    "decode": {
+      "kind": "speech",
+      "profile": "five-value",
+      "backend": "phonon2-five-value",
+      "model_dir": "/Users/jackboylan/.cache/fermion/speech/FermionResearch__Phonon-2/model_phonon2_c4c_int6",
+      "runtime": "mlx-audio parakeet graph; five-value encoder linears as 2-bit planes",
+      "activations": "bfloat16",
+      "five_value_modules": 264,
+      "levers": [
+        "tdt16",
+        "dense16"
+      ],
+      "levers_error": null,
+      "load_seconds": 12.01,
+      "hotwords": [],
+      "hotword_bias": "not available on this decoder"
+    },
+    "endpoints": [
+      "/v1/audio/transcriptions",
+      "/v1/audio/stream",
+      "/v1/models",
+      "/health"
+    ],
+    "tool_calling": false,
+    "stats": {
+      "requests": 0,
+      "streams": 0,
+      "audio_seconds": 0.0,
+      "decode_seconds": 0.0,
+      "errors": 0,
+      "realtime_factor": null
+    }
+  },
+  "command": [
+    "/Users/jackboylan/workspace/speech-to-speech-phonon/.venv/bin/python",
+    "scripts/benchmark_phonon.py",
+    "--manifest",
+    "progress/evaluations/librispeech-mini/manifest.jsonl",
+    "--backend",
+    "phonon",
+    "--device",
+    "mps",
+    "--threads",
+    "4",
+    "--output",
+    "progress/evaluations/mac-candidate-sweep/phonon.json",
+    "--log-level",
+    "debug"
+  ],
+  "exit_code": 0,
+  "result": {
+    "successful_clips": 10,
+    "failed_clips": 0,
+    "warmup_failures": 0,
+    "median_first_partial_s": 0.6571461044950411,
+    "median_final_latency_s": 0.48533745801250916,
+    "word_errors_total": 12,
+    "reference_words_total": 254,
+    "wer": 0.047244094488188976,
+    "error": null
+  },
+  "server_health_end": {
+    "status": "ok",
+    "model": "FermionResearch/Phonon-2",
+    "kind": "speech",
+    "version": "0.2.7",
+    "repo": "FermionResearch/Phonon-2",
+    "profile": "five-value",
+    "sha256": "98125795b6dda72f5c6eee9ba33d19815df65dcb18b50a357bf9f73c9935309e",
+    "sha256_short": "98125795",
+    "download_bytes": 163515201,
+    "model_dir": "/Users/jackboylan/.cache/fermion/speech/FermionResearch__Phonon-2/model_phonon2_c4c_int6",
+    "decode": {
+      "kind": "speech",
+      "profile": "five-value",
+      "backend": "phonon2-five-value",
+      "model_dir": "/Users/jackboylan/.cache/fermion/speech/FermionResearch__Phonon-2/model_phonon2_c4c_int6",
+      "runtime": "mlx-audio parakeet graph; five-value encoder linears as 2-bit planes",
+      "activations": "bfloat16",
+      "five_value_modules": 264,
+      "levers": [
+        "tdt16",
+        "dense16"
+      ],
+      "levers_error": null,
+      "load_seconds": 12.01,
+      "hotwords": [],
+      "hotword_bias": "not available on this decoder"
+    },
+    "endpoints": [
+      "/v1/audio/transcriptions",
+      "/v1/audio/stream",
+      "/v1/models",
+      "/health"
+    ],
+    "tool_calling": false,
+    "stats": {
+      "requests": 0,
+      "streams": 11,
+      "audio_seconds": 115.61000000000001,
+      "decode_seconds": 47.727885130938375,
+      "errors": 0,
+      "realtime_factor": 2.42
+    }
+  },
+  "resources_after": {
+    "time": 1790889634.985712,
+    "uptime": "22:20  up 5 days,  5:41, 6 users, load averages: 3.26 3.20 3.22\n",
+    "df -h /": "Filesystem        Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk3s1s1   228Gi    13Gi    16Gi    46%    484k  167M    0%   /\n",
+    "memory_pressure": "The system has 8589934592 (524288 pages with a page size of 16384).\n\nStats: \nPages free: 12377 \nPages purgeable: 28 \nPages purged: 36084526 \n\nSwap I/O:\nSwapins: 11435547 \nSwapouts: 13821544 \n\nPage Q counts:\nPages active: 72674 \nPages inactive: 66335 \nPages speculative: 5583 \nPages throttled: 0 \nPages wired down: 136896 \n\nCompressor Stats:\nPages used by compressor: 193747 \nPages decompressed: 433370161 \nPages compressed: 473422523 \n\nFile I/O:\nPageins: 71662251 \nPageouts: 1793662 \n\nSystem-wide memory free percentage: 31%\n",
+    "sysctl vm.swapusage": "vm.swapusage: total = 10240.00M  used = 9267.00M  free = 973.00M  (encrypted)\n"
+  }
+}
