@@ -36,10 +36,34 @@ The normal LLM and TTS flags still apply. Native partials work without
 for offline backends. Pipeline VAD settings still decide when the LLM starts.
 The first utterance can include server warmup time.
 
-For Apple Silicon, use the [Fermion installation instructions](https://github.com/fermionresearch/phonon)
-and the same `fermion serve phonon-2` command. For NVIDIA, use the
+For Apple Silicon, install its speech dependencies in the separate environment:
+
+```bash
+uv pip install --python .venv-phonon/bin/python mlx mlx-audio mlx-lm soundfile scipy zstandard
+.venv-phonon/bin/fermion serve phonon-2 --port 18090 --threads 4
+```
+
+Use the [Fermion installation instructions](https://github.com/fermionresearch/phonon)
+for platform changes. For NVIDIA, use the
 [Phonon-2 CUDA image](https://github.com/fermionresearch/phonon/blob/main/docs/cuda.md).
 Choose GPU IDs after checking other jobs, and preserve the downloaded model cache.
+For the tested CUDA image, reuse a CPU-downloaded Phonon-2 model directory:
+
+```bash
+PHONON_MODEL_DIR="$HOME/.cache/fermion/speech/FermionResearch__Phonon-2/model_phonon2_c4c_int6"
+docker run -d --name phonon-benchmark-cuda --gpus device=0 \
+  -p 127.0.0.1:18091:8000 \
+  --mount "type=bind,src=$PHONON_MODEL_DIR,dst=/model,readonly" \
+  ghcr.io/fermionresearch/phonon-cuda:1.0.5 \
+  serve --model phonon-2 --model-dir /model --host 0.0.0.0 --port 8000 \
+  --api-key phonon-benchmark-local
+docker logs --tail 30 phonon-benchmark-cuda
+curl --fail http://127.0.0.1:18091/health
+```
+
+Here `phonon-benchmark-local` is a local test key and the published port binds
+only to loopback. Point the adapter at `ws://127.0.0.1:18091/v1` and set
+`--phonon_stt_api_key phonon-benchmark-local` for this server.
 If exposing the demo to another device, use the repository's Tailscale instructions.
 
 ## Settings and behavior

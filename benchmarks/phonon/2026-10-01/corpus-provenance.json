@@ -1,0 +1,20 @@
+{
+  "repo": "hf-internal-testing/librispeech_asr_dummy",
+  "revision": "5be91486e11a2d616f4ec5db8d3fd248585ac07a",
+  "file": "clean/validation-00000-of-00001.parquet",
+  "selection": "first 10 rows",
+  "source_sha256": "4e69a06fa5edc90921e5e7e39a7084881f8b3ed9c805c574f4f39c6fde27c603",
+  "audio_sha256": {
+    "1272-128104-0000.flac": "4e25e22555cd16e90edb0a3b49fdcf1fe652b2a1250ab643634db33895c75b41",
+    "1272-128104-0001.flac": "46a9d58622b4675b29564da2d9ba73e702241c5fa969f12c387cad4aa984276a",
+    "1272-128104-0002.flac": "59bf7bb1129c11734a8dd362ad52b4e10ae31c03f0879fc92f7107ecd513513f",
+    "1272-128104-0003.flac": "60d72657439cd3092fc2313efe0fabd31f0cd2f28f8ca46a21380c290b2e031d",
+    "1272-128104-0004.flac": "07244790e9a8300bfcbf12c28ac5230792e75238d03b2ac167a72bf3943c5404",
+    "1272-128104-0005.flac": "870faa0669d19ca8416b9923cdf722ba9fd6ccce766a50583fa9c0f808b39eba",
+    "1272-128104-0006.flac": "12475ade3c01c9f750bfc95e1c5a5dd05afcfe30141a0f5464da59f0c01d26e4",
+    "1272-128104-0007.flac": "84998a43cb534e09801f5522b9ed0aa58e88035c9727bc8e4d362a7bc158d0b6",
+    "1272-128104-0008.flac": "08a3f099d544fac5df1b6105bfd4952d911995f271b494c9a689c083c39ab855",
+    "1272-128104-0009.flac": "2bfbcdfab6024ccd3bfeb4e883cc7f9cc613235e504bfc068fd34069056513b7"
+  },
+  "limit": "Small clean fixture, not representative corpus accuracy; repeated speaker."
+}
