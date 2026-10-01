@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from queue import Queue
 from threading import Event, Thread
+from time import sleep
 from typing import Any
 
 import numpy as np
@@ -12,6 +13,49 @@ from websockets.sync.server import serve
 from speech_to_speech.backend_registry import STT_BACKENDS
 from speech_to_speech.pipeline.messages import PartialTranscription, Transcription, TranscriptionFailure, VADAudio
 from speech_to_speech.STT.streaming_handler import PhononSTTHandler
+
+
+def test_phonon_does_not_send_keepalive_while_server_finalizes(monkeypatch):
+    from websockets.frames import Frame, Opcode
+    from websockets.sync import client
+    from websockets.sync.server import ServerConnection
+
+    pings = []
+
+    class ObservedConnection(ServerConnection):
+        def process_event(self, event):
+            if isinstance(event, Frame) and event.opcode is Opcode.PING:
+                pings.append(event)
+            super().process_event(event)
+
+    original_connect = client.connect
+
+    def fast_keepalive(*args, **kwargs):
+        kwargs.setdefault("ping_interval", 0.01)
+        return original_connect(*args, **kwargs)
+
+    monkeypatch.setattr(client, "connect", fast_keepalive)
+
+    def finish(socket):
+        socket.recv()  # Configuration.
+        socket.recv()  # PCM.
+        assert json.loads(socket.recv()) == {"type": "end"}
+        sleep(0.1)  # A final decode must not leave client pings unread.
+        socket.send(json.dumps({"type": "done", "text": "Complete."}))
+
+    server = serve(finish, "127.0.0.1", 0, create_connection=ObservedConnection)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    stt = handler(f"ws://127.0.0.1:{server.socket.getsockname()[1]}/v1")
+    try:
+        stt.start_turn("turn_1", 0)
+        stt.append_audio(b"\x00\x00")
+        assert list(stt.process(final()))[0].text == "Complete."
+        assert pings == []
+    finally:
+        stt.cleanup()
+        server.shutdown()
+        thread.join(timeout=2)
 
 
 @pytest.fixture

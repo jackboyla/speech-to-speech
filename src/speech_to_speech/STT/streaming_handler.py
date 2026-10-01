@@ -342,6 +342,15 @@ def _default_connect(url: str, *, headers: dict[str, str], open_timeout: float) 
     return connect(url, additional_headers=headers, open_timeout=open_timeout, close_timeout=1.0)
 
 
+def _phonon_connect(url: str, *, headers: dict[str, str], open_timeout: float) -> _WebSocket:
+    from websockets.sync.client import connect
+
+    # Phonon stops reading frames after `end` and closes TCP after `done`.
+    # A keepalive ping queued during its final decode can remain unread,
+    # causing a TCP reset that races delivery of the final transcript.
+    return connect(url, additional_headers=headers, open_timeout=open_timeout, close_timeout=1.0, ping_interval=None)
+
+
 def _endpoint_url(base_url: str, model: str, *, include_model_query: bool, endpoint_path: str = "/realtime") -> str:
     split = urlsplit(base_url.strip())
     scheme = {"http": "ws", "https": "wss"}.get(split.scheme, split.scheme)
@@ -1181,6 +1190,6 @@ class PhononSTTHandler(StatefulStreamingSTTHandler):
             api_key=api_key,
             language=language,
             speculative_turns=speculative_turns,
-            connect_factory=connect_factory,
+            connect_factory=connect_factory or _phonon_connect,
             pipeline_index=pipeline_index,
         )

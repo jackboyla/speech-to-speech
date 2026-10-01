@@ -186,19 +186,66 @@ is 2,509,332,480 bytes at HF revision
 163,515,201 bytes. The CUDA runtime image itself occupies 13.1 GB unpacked in
 Docker, separate from those model downloads.
 
-## Mac status
+## M2 Mac results (2026-10-01)
 
-The available M2 MacBook Air has 8 GiB RAM. The first setup lacked MLX speech
-dependencies; the local environment setup was updated to install them. SSH then
-timed out on repeated checks, so neither server readiness nor inference could
-be verified. There are no Mac latency or WER results. The exact rerun script is
-`progress/start-phonon-mac.sh`, and the attempted run is recorded in the ledger.
-The vendor's M5 figures are not measurements of this M2 or this adapter.
+The M2 MacBook Air has 8 GiB RAM and runs macOS 27.0. Client and server ran
+on the Mac through localhost, with Fermion 0.2.7, MLX 0.32.3, mlx-audio 0.5.7,
+and Torch 2.14.1. User apps stayed open; this was a shared-machine test.
+The server reported 19.74 seconds to load and 10.5 seconds for its first stream
+warmup. The reported run used an already warm server and a separate warmup clip.
+
+| Metric | Phonon-2 native, M2 |
+|---|---:|
+| Successful finals | 10 / 10 |
+| Median first partial | 658.0 ms |
+| Median wait after audio end | 560.2 ms |
+| Final wait range | 160.7–12,493.0 ms |
+| Word errors | 12 / 254 |
+| WER | 4.72% |
+
+The first run completed nine clips. The tenth received `done` on the wire but
+lost it during a connection reset. A single-clip retry succeeded with another
+reset in its close log. Phonon stops reading frames after `end`, so a client
+keepalive ping sent during final decode can remain unread when the server
+closes TCP. The adapter now disables periodic pings for Phonon; the full repeat
+completed ten clips with no failures. These reports preserve the failed run and
+retry separately. A reset still appeared after one final had reached the handler;
+disabling pings does not repair the server's close handshake. Timing varies
+between runs; the improved median does not
+establish that the transport fix sped up decoding. The 12.5-second final wait
+also prevents a claim of steady low latency on this Mac.
+
+To repeat on Apple Silicon, prepare the corpus above and install the server in
+its own project environment. Run the server command inside tmux, then run the
+client command in a second tmux session:
+
+```bash
+uv venv .venv-phonon --python 3.11
+uv pip install --python .venv-phonon/bin/python fermion-research==0.2.7 \
+  mlx==0.32.3 mlx-audio==0.5.7 mlx-lm soundfile scipy zstandard
+mkdir -p progress/logs progress/evaluations
+.venv-phonon/bin/fermion serve phonon-2 --port 18090 --threads 4 \
+  2>&1 | tee progress/logs/phonon-server.log
+
+# In the client shell, from the same checkout:
+uv pip install --python .venv-phonon/bin/python soxr openai==3.22.1 websockets==17.1
+curl --fail http://127.0.0.1:18090/health
+PYTHONPATH=src OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 \
+  .venv-phonon/bin/python scripts/benchmark_phonon.py \
+  --manifest progress/evaluations/librispeech-mini/manifest.jsonl \
+  --backend phonon --base-url ws://127.0.0.1:18090/v1 --device mps --threads 4 \
+  --output progress/evaluations/phonon-mini-mac.json \
+  2>&1 | tee progress/logs/phonon-mini-mac.log
+```
+
+This small client environment uses the checked-out adapter, rather than installing
+the full pipeline. There is no Mac Parakeet baseline, full voice-agent test, or
+measured server memory footprint. The vendor's M5 figures do not describe this M2.
 
 ## Artifacts
 
 The [committed reports and corpus hashes](../benchmarks/phonon/README.md) preserve
-the ten-clip CPU and CUDA results. Session logs, references and the append-only
+the ten-clip CPU, CUDA and Mac results. Session logs, references and the append-only
 run ledger also live in `progress/evaluations/` and `progress/experiment-log.md`. The audio can be
 regenerated with the pinned export command; no downloaded models belong in Git.
 

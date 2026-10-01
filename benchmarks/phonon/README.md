@@ -2,8 +2,8 @@
 
 The [benchmark guide](../../docs/phonon-benchmark.md) defines the measurements,
 commands, dataset selection and limits. The initial reports in `2026-10-01/`
-compare ten labeled clips on CPU and RTX 5090. They include a separate warmup
-and each final transcript. The corpus provenance pins the source revision and
+cover ten labeled clips on CPU, RTX 5090 and an M2 MacBook Air. They include a
+separate warmup and each final transcript. The corpus provenance pins the source revision and
 hashes. Downloaded audio and models are not checked in.
 
 To regenerate the audio:
@@ -22,5 +22,8 @@ Torch version, machine, cadence and thread settings remain in the files.
 
 The CPU Parakeet progressive path failed inside nano-parakeet 0.2.1's timestamp
 decoder, so those first-partial values are null. Its CUDA path works. Phonon's
-client CPU and RSS fields exclude its external server. No Mac inference result
-was obtained. The small clean fixture cannot establish general model accuracy.
+client CPU and RSS fields exclude its external server. The Mac report has ten
+successful finals after a Phonon keepalive fix; the failed first run and single-clip
+retry remain separate reports. Mac final waits include a 12.5-second slow case.
+There is no Mac Parakeet baseline. The small clean fixture cannot establish
+general model accuracy.
