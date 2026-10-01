@@ -1,0 +1,41 @@
+{
+  "repo": "mlx-community/parakeet-tdt-0.6b-v3",
+  "revision": "ed2b7e8c15f9aaa0b5772e2efb986255eaef7e15",
+  "snapshot": "/Users/jackboylan/.cache/huggingface/hub/models--mlx-community--parakeet-tdt-0.6b-v3/snapshots/ed2b7e8c15f9aaa0b5772e2efb986255eaef7e15",
+  "files": [
+    {
+      "name": ".gitattributes",
+      "bytes": 1519
+    },
+    {
+      "name": "README.md",
+      "bytes": 1081
+    },
+    {
+      "name": "config.json",
+      "bytes": 244093
+    },
+    {
+      "name": "model.safetensors",
+      "bytes": 2508288736
+    },
+    {
+      "name": "tokenizer.model",
+      "bytes": 360916
+    },
+    {
+      "name": "tokenizer.vocab",
+      "bytes": 101024
+    },
+    {
+      "name": "vocab.txt",
+      "bytes": 46772
+    }
+  ],
+  "packages": {
+    "mlx": "0.32.3",
+    "mlx-audio": "0.5.7",
+    "torch": "2.14.1",
+    "lingua-language-detector": "2.1.1"
+  }
+}

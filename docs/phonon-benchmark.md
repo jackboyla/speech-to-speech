@@ -191,7 +191,7 @@ Docker, separate from those model downloads.
 The M2 MacBook Air has 8 GiB RAM and runs macOS 27.0. Client and server ran
 on the Mac through localhost, with Fermion 0.2.7, MLX 0.32.3, mlx-audio 0.5.7,
 and Torch 2.14.1. User apps stayed open; this was a shared-machine test.
-The server reported 19.74 seconds to load and 10.5 seconds for its first stream
+The initial server reported 19.74 seconds to load and 10.5 seconds for its first stream
 warmup. The reported run used an already warm server and a separate warmup clip.
 
 | Metric | Phonon-2 native, M2 |
@@ -214,6 +214,46 @@ disabling pings does not repair the server's close handshake. Timing varies
 between runs; the improved median does not
 establish that the transport fix sped up decoding. The 12.5-second final wait
 also prevents a claim of steady low latency on this Mac.
+
+### Sequential Parakeet comparison
+
+We then ran the current Parakeet MPS handler and a fresh Phonon run, one at a
+time on the same Mac. Each used the same ten clips, one excluded warmup, 32 ms
+capture chunks, and four CPU threads. Parakeet requested growing-window updates
+every 0.5 seconds; Phonon used its native stream. We paused our idle Phonon server
+during Parakeet and restored it afterward. User apps stayed open.
+
+| Metric | Phonon-2 native | Parakeet TDT, MLX |
+|---|---:|---:|
+| Successful finals | 10 / 10 | 10 / 10 |
+| Clips with a partial | 10 / 10 | 9 / 10 |
+| Median first partial | 654.2 ms | 2,209.7 ms |
+| Median wait after audio end | 310.8 ms | 7,377.3 ms |
+| Longest final wait | 2,069.0 ms | 26,958.6 ms |
+| Word errors | 12 / 254 | 7 / 254 |
+| WER | 4.72% | 2.76% |
+
+Parakeet's partial median covers the nine clips that produced a nonempty partial;
+final medians cover all ten. The Phonon run finished with no connection errors in
+its debug log. Both warmups succeeded. Parakeet made five fewer word errors;
+Phonon delivered earlier partials and finals in this comparison. All original
+reports remain available, including Phonon's earlier 12.5-second slow case.
+
+Both used MLX 0.32.3 and mlx-audio 0.5.7 in the small benchmark environment,
+rather than the repo's full pinned Mac install. Parakeet used
+`mlx-community/parakeet-tdt-0.6b-v3` at revision
+`ed2b7e8c15f9aaa0b5772e2efb986255eaef7e15`; its safetensors file is
+2,508,288,736 bytes. The cached Parakeet handler setup took 8.24 seconds;
+the restored Phonon server reported 11.41 seconds to load. These setup boundaries
+differ and exclude the initial Parakeet download.
+
+The Mac had memory pressure and active background tasks. Sampled system memory
+free percentages ranged from 17–30% during Parakeet and reached 63% after its
+process exited. During Phonon we sampled 21% free and about 8.9 GiB of swap in
+use. We did not collect continuous memory or swap traces for both runs, so we
+cannot attribute the slow clips to one cause. These numbers describe the current
+handlers on this shared 8 GiB Mac, not isolated model speed. There is still no
+full voice-agent test or representative accuracy study.
 
 To repeat on Apple Silicon, prepare the corpus above and install the server in
 its own project environment. Run the server command inside tmux, then run the
@@ -238,9 +278,28 @@ PYTHONPATH=src OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 \
   2>&1 | tee progress/logs/phonon-mini-mac.log
 ```
 
+For Parakeet, stop only your own idle Phonon server, then run this in tmux.
+Restore that server after Parakeet exits. Record the printed snapshot revision;
+the offline run uses the cached model without resolving a new revision:
+
+```bash
+uv pip install --python .venv-phonon/bin/python lingua-language-detector==2.1.1
+.venv-phonon/bin/python - <<'PY'
+from huggingface_hub import snapshot_download
+print(snapshot_download("mlx-community/parakeet-tdt-0.6b-v3"))
+PY
+HF_HUB_OFFLINE=1 PYTHONPATH=src OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 \
+  .venv-phonon/bin/python scripts/benchmark_phonon.py \
+  --manifest progress/evaluations/librispeech-mini/manifest.jsonl \
+  --backend parakeet-tdt --device mps --threads 4 \
+  --output progress/evaluations/parakeet-mini-mac.json \
+  2>&1 | tee progress/logs/parakeet-mini-mac.log
+```
+
 This small client environment uses the checked-out adapter, rather than installing
-the full pipeline. There is no Mac Parakeet baseline, full voice-agent test, or
-measured server memory footprint. The vendor's M5 figures do not describe this M2.
+the full pipeline. Client RSS excludes the external Phonon server and does not
+measure total Metal/unified memory for Parakeet. It cannot compare total model
+memory. The vendor's M5 figures do not describe this M2.
 
 ## Artifacts
 

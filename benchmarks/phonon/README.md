@@ -25,5 +25,9 @@ decoder, so those first-partial values are null. Its CUDA path works. Phonon's
 client CPU and RSS fields exclude its external server. The Mac report has ten
 successful finals after a Phonon keepalive fix; the failed first run and single-clip
 retry remain separate reports. Mac final waits include a 12.5-second slow case.
-There is no Mac Parakeet baseline. The small clean fixture cannot establish
-general model accuracy.
+The later sequential Mac comparison uses `parakeet-mini-mac.json` and
+`phonon-mini-mac-paired.json`. Both completed ten clips. Phonon delivered earlier
+partials and finals; Parakeet made five fewer word errors. Model revision/file
+sizes are in `parakeet-mac-model.json`; restored Phonon server details are in
+`phonon-mac-paired-health-end.json`. Memory pressure and background tasks limit
+the timing comparison. The small clean fixture cannot establish general accuracy.

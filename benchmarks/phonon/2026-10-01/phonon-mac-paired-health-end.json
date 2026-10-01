@@ -1,0 +1,44 @@
+{
+  "status": "ok",
+  "model": "FermionResearch/Phonon-2",
+  "kind": "speech",
+  "version": "0.2.7",
+  "repo": "FermionResearch/Phonon-2",
+  "profile": "five-value",
+  "sha256": "98125795b6dda72f5c6eee9ba33d19815df65dcb18b50a357bf9f73c9935309e",
+  "sha256_short": "98125795",
+  "download_bytes": 163515201,
+  "model_dir": "/Users/jackboylan/.cache/fermion/speech/FermionResearch__Phonon-2/model_phonon2_c4c_int6",
+  "decode": {
+    "kind": "speech",
+    "profile": "five-value",
+    "backend": "phonon2-five-value",
+    "model_dir": "/Users/jackboylan/.cache/fermion/speech/FermionResearch__Phonon-2/model_phonon2_c4c_int6",
+    "runtime": "mlx-audio parakeet graph; five-value encoder linears as 2-bit planes",
+    "activations": "bfloat16",
+    "five_value_modules": 264,
+    "levers": [
+      "tdt16",
+      "dense16"
+    ],
+    "levers_error": null,
+    "load_seconds": 11.41,
+    "hotwords": [],
+    "hotword_bias": "not available on this decoder"
+  },
+  "endpoints": [
+    "/v1/audio/transcriptions",
+    "/v1/audio/stream",
+    "/v1/models",
+    "/health"
+  ],
+  "tool_calling": false,
+  "stats": {
+    "requests": 0,
+    "streams": 11,
+    "audio_seconds": 115.61000000000001,
+    "decode_seconds": 48.90865470794961,
+    "errors": 0,
+    "realtime_factor": 2.36
+  }
+}
