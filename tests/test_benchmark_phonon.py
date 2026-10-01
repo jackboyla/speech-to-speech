@@ -112,3 +112,38 @@ def test_failed_final_does_not_turn_into_successful_empty_transcript():
     assert result["transcript"] is None
     assert result["final_latency_s"] is None
     assert result["errors"] == ["engine busy"]
+
+
+def test_failed_warmup_sets_failure_status_even_when_measured_clip_succeeds(tmp_path, monkeypatch):
+    from scripts import benchmark_phonon
+
+    class WarmupFailure(NativeHandler):
+        def process(self, source):
+            if source.turn_id.startswith("warmup_"):
+                yield TranscriptionFailure(message="warmup failed", turn_id=source.turn_id, turn_revision=0)
+            else:
+                yield Transcription(text="hello", turn_id=source.turn_id, turn_revision=0)
+
+    audio = tmp_path / "clip.wav"
+    audio.touch()
+    manifest = tmp_path / "manifest.jsonl"
+    manifest.write_text(json.dumps({"audio": "clip.wav", "text": "hello"}) + "\n")
+    output = tmp_path / "result.json"
+    monkeypatch.setattr(benchmark_phonon, "make_handler", lambda args: WarmupFailure())
+    monkeypatch.setattr(benchmark_phonon, "load_audio", lambda path: np.zeros(128, dtype=np.float32))
+    status = benchmark_phonon.main(
+        [
+            "--manifest",
+            str(manifest),
+            "--backend",
+            "phonon",
+            "--output",
+            str(output),
+        ]
+    )
+    report = json.loads(output.read_text())
+    assert status == 1
+    assert report["warmup_failures"] == 1
+    assert report["failed_clips"] == 0
+    assert report["successful_clips"] == 1
+    assert report["wer"] == 0

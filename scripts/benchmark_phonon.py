@@ -180,8 +180,11 @@ def run_clip(
     transcript = None
     finished = None
     try:
-        deadline = started + len(audio) / RATE + timeout
-        while perf_counter() < deadline:
+        capture_deadline = started + len(audio) / RATE + timeout
+        while True:
+            deadline = audio_end[0] + timeout if audio_end else capture_deadline
+            if perf_counter() >= deadline:
+                break
             try:
                 result = output.get(timeout=min(0.05, max(0.001, deadline - perf_counter())))
             except Empty:
@@ -284,6 +287,7 @@ def main(argv: list[str] | None = None) -> int:
                     turn_id=f"warmup_{index}",
                 )
             )
+        report["warmup_failures"] = sum(bool(row["errors"]) for row in report["warmup"])
         for index, row in enumerate(rows):
             result = run_clip(
                 handler,
@@ -332,7 +336,7 @@ def main(argv: list[str] | None = None) -> int:
                 cleanup()
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2) + "\n")
-    return 1 if report.get("error") or report.get("failed_clips") else 0
+    return 1 if report.get("error") or report.get("failed_clips") or report.get("warmup_failures") else 0
 
 
 if __name__ == "__main__":

@@ -74,7 +74,7 @@ server; `--device` does not select the external server's hardware. Run one
 stream per worker, and never overlap clients on a single Phonon endpoint.
 Use `--log-level debug` to expose backend errors hidden during progressive
 transcription. Check the JSON error fields as well as logs; exit status is
-nonzero for a failed final or failed run. Failed clips remain in the report;
+nonzero for a failed warmup, failed final or failed run. Failed clips remain in the report;
 aggregate WER includes successful finals only, with failure counts alongside it.
 
 ## Measurement definitions
