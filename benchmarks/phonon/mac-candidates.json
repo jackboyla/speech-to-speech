@@ -1,0 +1,11 @@
+[
+  {"id": "moonshine-tiny", "backend": "moonshine", "model": "tiny-streaming", "device": "cpu"},
+  {"id": "moonshine-small", "backend": "moonshine", "model": "small-streaming", "device": "cpu"},
+  {"id": "moonshine-medium", "backend": "moonshine", "model": "medium-streaming", "device": "cpu"},
+  {"id": "whisper-tiny", "backend": "mlx-audio-whisper", "model": "mlx-community/whisper-tiny", "device": "mps"},
+  {"id": "whisper-base", "backend": "mlx-audio-whisper", "model": "mlx-community/whisper-base-mlx", "device": "mps"},
+  {"id": "whisper-small", "backend": "mlx-audio-whisper", "model": "mlx-community/whisper-small-mlx", "device": "mps"},
+  {"id": "whisper-turbo", "backend": "mlx-audio-whisper", "model": "mlx-community/whisper-large-v3-turbo", "device": "mps"},
+  {"id": "parakeet", "backend": "parakeet-tdt", "model": "mlx-community/parakeet-tdt-0.6b-v3", "device": "mps"},
+  {"id": "phonon", "backend": "phonon", "device": "mps"}
+]

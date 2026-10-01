@@ -79,7 +79,7 @@ def pcm16(audio: np.ndarray) -> bytes:
 
 def package_versions() -> dict[str, str | None]:
     versions = {}
-    for name in ["numpy", "soundfile", "soxr", "websockets", "nano-parakeet", "mlx-audio"]:
+    for name in ["numpy", "soundfile", "soxr", "websockets", "nano-parakeet", "mlx", "mlx-audio", "moonshine-voice"]:
         try:
             versions[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
@@ -88,12 +88,16 @@ def package_versions() -> dict[str, str | None]:
 
 
 def make_handler(args: argparse.Namespace):
+    if args.backend == "moonshine":
+        from benchmark_moonshine_handler import MoonshineBenchmarkHandler
+
+        return MoonshineBenchmarkHandler(args.model or "medium-streaming", args.partial_interval)
     if args.backend == "phonon":
         from speech_to_speech.STT.streaming_handler import PhononSTTHandler
 
         cls = PhononSTTHandler
         kwargs = {"base_url": args.base_url, "api_key": args.api_key, "final_timeout": args.timeout}
-    else:
+    elif args.backend == "parakeet-tdt":
         from speech_to_speech.STT.parakeet_tdt_handler import ParakeetTDTSTTHandler
 
         cls = ParakeetTDTSTTHandler
@@ -102,6 +106,18 @@ def make_handler(args: argparse.Namespace):
             "enable_live_transcription": True,
             "live_transcription_update_interval": args.partial_interval,
         }
+        if args.model:
+            kwargs["model_name"] = args.model
+    elif args.backend == "mlx-audio-whisper":
+        from speech_to_speech.STT.mlx_audio_whisper_handler import MLXAudioWhisperSTTHandler
+
+        cls = MLXAudioWhisperSTTHandler
+        kwargs = {"model_name": args.model or "mlx-community/whisper-large-v3-turbo", "language": "en"}
+    else:
+        from speech_to_speech.STT.lightning_whisper_mlx_handler import LightningWhisperSTTHandler
+
+        cls = LightningWhisperSTTHandler
+        kwargs = {"model_name": args.model or "distil-large-v3", "language": "en", "device": "mps"}
     return cls(Event(), queue_in=Queue(), queue_out=Queue(), setup_kwargs=kwargs)
 
 
@@ -158,12 +174,15 @@ def run_clip(
                 end = min(len(audio), offset + chunk_samples)
                 if stop.wait(max(0, started + end / RATE - perf_counter())):
                     return
+                if end == len(audio):
+                    # Timestamp capture before a synchronous native decoder
+                    # processes the last chunk, so that cost remains in final latency.
+                    audio_end.append(perf_counter())
                 if native:
                     handler.append_audio(pcm16(audio[offset:end]))
                 elif end / RATE >= next_partial and end < len(audio):
                     enqueue_latest(VADAudio(audio=audio[:end], mode="progressive", turn_id=turn_id, turn_revision=0))
                     next_partial = end / RATE + partial_interval
-            audio_end.append(perf_counter())
             if native:
                 handler.commit_boundary(turn_id, 0)
             enqueue_latest(VADAudio(audio=audio, mode="final", turn_id=turn_id, turn_revision=0))
@@ -195,6 +214,9 @@ def run_clip(
                 if first_partial is None:
                     first_partial = now - started
             elif isinstance(result, Transcription):
+                if not result.text.strip():
+                    errors.append("empty final transcript for labeled speech")
+                    break
                 transcript, finished = result.text, now
                 break
             elif isinstance(result, TranscriptionFailure):
@@ -228,7 +250,10 @@ def run_clip(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--backend", choices=["phonon", "parakeet-tdt"], required=True)
+    parser.add_argument(
+        "--backend", choices=["phonon", "parakeet-tdt", "mlx-audio-whisper", "whisper-mlx", "moonshine"], required=True
+    )
+    parser.add_argument("--model", default=None, help="Checkpoint/path for offline models; Moonshine streaming size")
     parser.add_argument("--base-url", default="ws://127.0.0.1:18090/v1")
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--device", default="cpu")
@@ -252,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
     torch.set_num_threads(args.threads)
     report: dict[str, Any] = {
         "backend": args.backend,
+        "model": args.model,
         "machine": platform.node(),
         "platform": platform.platform(),
         "python": sys.version,
@@ -274,13 +300,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         started = perf_counter()
         handler = make_handler(args)
+        if args.backend == "moonshine":
+            report["scope"] = "benchmark-only Moonshine bridge; native library VAD; no repo adapter/LLM/TTS"
+            report["model_metadata"] = handler.model_metadata
         report["handler_startup_s"] = perf_counter() - started
         for index in range(args.warmup):
             report["warmup"].append(
                 run_clip(
                     handler,
                     load_audio(rows[0]["audio"]),
-                    native=args.backend == "phonon",
+                    native=args.backend in {"phonon", "moonshine"},
                     chunk_ms=args.chunk_ms,
                     partial_interval=args.partial_interval,
                     timeout=args.timeout,
@@ -292,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
             result = run_clip(
                 handler,
                 load_audio(row["audio"]),
-                native=args.backend == "phonon",
+                native=args.backend in {"phonon", "moonshine"},
                 chunk_ms=args.chunk_ms,
                 partial_interval=args.partial_interval,
                 timeout=args.timeout,

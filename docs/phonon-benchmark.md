@@ -6,6 +6,8 @@ capture speed and reports hypotheses, final latency, normalized word error rate
 (WER), failures, setup time, and client resource use. It does not run microphone
 capture, VAD, the Realtime service, the LLM, or TTS.
 
+For the wider Mac comparison, see the [candidate sweep](../benchmarks/phonon/README.md#mac-candidate-sweep) and its saved reports.
+
 ## Prepare labeled audio
 
 A JSONL manifest contains one file and reference transcript per line. Relative

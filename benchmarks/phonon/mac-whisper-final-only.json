@@ -1,0 +1,30 @@
+[
+  {
+    "id": "whisper-tiny-final-only",
+    "backend": "mlx-audio-whisper",
+    "model": "mlx-community/whisper-tiny",
+    "device": "mps",
+    "partial_interval": 1000
+  },
+  {
+    "id": "whisper-base-final-only",
+    "backend": "mlx-audio-whisper",
+    "model": "mlx-community/whisper-base-mlx",
+    "device": "mps",
+    "partial_interval": 1000
+  },
+  {
+    "id": "whisper-small-final-only",
+    "backend": "mlx-audio-whisper",
+    "model": "mlx-community/whisper-small-mlx",
+    "device": "mps",
+    "partial_interval": 1000
+  },
+  {
+    "id": "whisper-turbo-final-only",
+    "backend": "mlx-audio-whisper",
+    "model": "mlx-community/whisper-large-v3-turbo",
+    "device": "mps",
+    "partial_interval": 1000
+  }
+]

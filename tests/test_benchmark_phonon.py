@@ -114,6 +114,44 @@ def test_failed_final_does_not_turn_into_successful_empty_transcript():
     assert result["errors"] == ["engine busy"]
 
 
+def test_synchronous_last_chunk_decode_counts_in_final_latency():
+    from time import sleep
+
+    class BlockingNative(NativeHandler):
+        def append_audio(self, audio):
+            super().append_audio(audio)
+            sleep(0.04)
+
+    result = run_clip(
+        BlockingNative(),
+        np.ones(256, dtype=np.float32),
+        native=True,
+        chunk_ms=16,
+        partial_interval=0.5,
+        timeout=1,
+        turn_id="clip",
+    )
+    assert result["final_latency_s"] >= 0.04
+
+
+def test_empty_final_on_labeled_speech_is_a_failure():
+    class EmptyFinal(NativeHandler):
+        def process(self, source):
+            yield Transcription(text="", turn_id=source.turn_id, turn_revision=0)
+
+    result = run_clip(
+        EmptyFinal(),
+        np.zeros(256, dtype=np.float32),
+        native=True,
+        chunk_ms=16,
+        partial_interval=0.5,
+        timeout=1,
+        turn_id="clip",
+    )
+    assert result["transcript"] is None
+    assert result["errors"] == ["empty final transcript for labeled speech"]
+
+
 def test_failed_warmup_sets_failure_status_even_when_measured_clip_succeeds(tmp_path, monkeypatch):
     from scripts import benchmark_phonon
 

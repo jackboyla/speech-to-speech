@@ -1,0 +1,14 @@
+[
+  {
+    "id": "whisper-tiny-current",
+    "backend": "mlx-audio-whisper",
+    "model": "mlx-community/whisper-tiny-asr-fp16",
+    "device": "mps"
+  },
+  {
+    "id": "whisper-turbo-current",
+    "backend": "mlx-audio-whisper",
+    "model": "mlx-community/whisper-large-v3-turbo-asr-fp16",
+    "device": "mps"
+  }
+]
