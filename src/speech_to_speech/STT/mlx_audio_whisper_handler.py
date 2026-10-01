@@ -70,7 +70,9 @@ class MLXAudioWhisperSTTHandler(BaseSTTHandler):
                 "mlx-community/whisper-large-v3": "openai/whisper-large-v3",
                 "mlx-community/whisper-medium": "openai/whisper-medium",
                 "mlx-community/whisper-small": "openai/whisper-small",
+                "mlx-community/whisper-small-mlx": "openai/whisper-small",
                 "mlx-community/whisper-base": "openai/whisper-base",
+                "mlx-community/whisper-base-mlx": "openai/whisper-base",
                 "mlx-community/whisper-tiny": "openai/whisper-tiny",
             }
 

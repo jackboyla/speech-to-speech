@@ -176,6 +176,29 @@ def test_concurrent_process_calls_are_serialized():
 # --- language resolution -----------------------------------------------------------------
 
 
+@pytest.mark.parametrize("size", ["base", "small"])
+def test_mlx_suffixed_checkpoints_load_matching_processor(monkeypatch, size):
+    from transformers import WhisperProcessor
+
+    fake_model = FakeModel(FakeResult("", "en"))
+    fake_model._processor = None
+    stt_generate = types.ModuleType("mlx_audio.stt.generate")
+    stt_generate.load_model = lambda model_name: fake_model  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mlx_audio", types.ModuleType("mlx_audio"))
+    monkeypatch.setitem(sys.modules, "mlx_audio.stt", types.ModuleType("mlx_audio.stt"))
+    monkeypatch.setitem(sys.modules, "mlx_audio.stt.generate", stt_generate)
+    requested = []
+
+    def load_processor(model):
+        requested.append(model)
+        return object()
+
+    monkeypatch.setattr(WhisperProcessor, "from_pretrained", load_processor)
+    handler = object.__new__(MLXAudioWhisperSTTHandler)
+    handler.setup(model_name=f"mlx-community/whisper-{size}-mlx", language="en")
+    assert requested == [f"openai/whisper-{size}"]
+
+
 @pytest.mark.parametrize(
     ("language", "expected_last_language"),
     [("auto", None), ("de", "de"), (None, None)],
