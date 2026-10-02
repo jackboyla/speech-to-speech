@@ -48,6 +48,9 @@ class SessionState(BaseModel):
     # its handlers may still emit this session's output — until SESSION_END
     # actually drains. Reported as "stuck" by /v1/pool.
     quarantined_at: Optional[float] = None
+    # BackchannelGate when --backchannel_url is set; holds user turns that
+    # start during assistant playback until they are classified.
+    backchannel_gate: Any = None
 
 
 class PipelineUnit(BaseModel):

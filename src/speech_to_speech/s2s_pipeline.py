@@ -5,7 +5,7 @@ import os
 import signal
 import sys
 from copy import deepcopy
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from queue import Queue
 from sys import modules, platform
@@ -18,7 +18,9 @@ import torch
 from rich.console import Console
 from transformers import HfArgumentParser
 
+from speech_to_speech.api.openai_realtime.backchannel import BackchannelConfig
 from speech_to_speech.api.openai_realtime.pipeline_unit import PipelineUnit
+from speech_to_speech.arguments_classes.backchannel_arguments import BackchannelArguments
 from speech_to_speech.arguments_classes.local_audio_arguments import LocalAudioArguments
 from speech_to_speech.arguments_classes.module_arguments import ModuleArguments
 from speech_to_speech.arguments_classes.realtime_server_arguments import (
@@ -107,6 +109,7 @@ class ParsedArguments:
     stt_backend: BackendSelection
     llm_backend: BackendSelection
     tts_backend: BackendSelection
+    backchannel_kwargs: BackchannelArguments = field(default_factory=BackchannelArguments)
 
 
 def build_llm_proxy_config(
@@ -130,6 +133,18 @@ def build_llm_proxy_config(
         upstream_api_key=config["api_key"],
         model_name=config["model_name"],
         connect_timeout_s=module_kwargs.llm_proxy_connect_timeout_s,
+    )
+
+
+def build_backchannel_config(backchannel_kwargs: BackchannelArguments) -> BackchannelConfig | None:
+    if not backchannel_kwargs.backchannel_url:
+        return None
+    return BackchannelConfig(
+        url=backchannel_kwargs.backchannel_url,
+        model=backchannel_kwargs.backchannel_model,
+        threshold=backchannel_kwargs.backchannel_threshold,
+        max_hold_ms=backchannel_kwargs.backchannel_max_hold_ms,
+        timeout_ms=backchannel_kwargs.backchannel_timeout_ms,
     )
 
 
@@ -232,6 +247,7 @@ def parse_arguments(
     argument_classes: list[type[Any]] = [
         ModuleArguments,
         server_arguments_class,
+        BackchannelArguments,
     ]
     if command == "local":
         argument_classes.append(LocalAudioArguments)
@@ -282,6 +298,7 @@ def parse_arguments(
         tts_backend=BackendSelection(
             selected_specs[2], selected_specs[2].normalize(by_type[selected_specs[2].config_type])
         ),
+        backchannel_kwargs=by_type[BackchannelArguments],
     )
     return args
 
@@ -623,6 +640,7 @@ def build_pipeline(
         llm_proxy_config=(
             build_llm_proxy_config(module_kwargs, args.llm_backend) if module_kwargs.enable_llm_proxy else None
         ),
+        backchannel_config=build_backchannel_config(args.backchannel_kwargs),
     )
 
     handlers: list[Any] = []

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from speech_to_speech.arguments_classes.backchannel_arguments import BackchannelArguments
 from speech_to_speech.arguments_classes.chat_completions_language_model_arguments import (
     ChatCompletionsLanguageModelHandlerArguments,
 )
@@ -19,7 +20,13 @@ from speech_to_speech.arguments_classes.vad_arguments import VADHandlerArguments
 from speech_to_speech.backend_registry import BackendSelection
 from speech_to_speech.cli import main, parse_command, parse_talk_arguments
 from speech_to_speech.pipeline.transcript_logging import log_transcripts_enabled, set_log_transcripts
-from speech_to_speech.s2s_pipeline import ParsedArguments, parse_arguments, prepare_all_args, prepare_module_args
+from speech_to_speech.s2s_pipeline import (
+    ParsedArguments,
+    build_backchannel_config,
+    parse_arguments,
+    prepare_all_args,
+    prepare_module_args,
+)
 
 
 def test_release_defaults_match_responses_api_parakeet_qwen3_profile():
@@ -163,6 +170,7 @@ EXPECTED_FIELD_TYPES = {
     "stt_backend": BackendSelection,
     "llm_backend": BackendSelection,
     "tts_backend": BackendSelection,
+    "backchannel_kwargs": BackchannelArguments,
 }
 
 
@@ -491,6 +499,35 @@ def test_local_accepts_audio_flags_but_rejects_host():
     assert args.local_audio_kwargs.local_audio_playback_buffer_ms == 240
     with pytest.raises(ValueError, match="--host"):
         parse_arguments(["--host", "0.0.0.0"], command="local")
+
+
+def test_backchannel_gate_is_off_by_default():
+    args = parse_arguments([], command="serve")
+
+    assert args.backchannel_kwargs.backchannel_url is None
+    assert build_backchannel_config(args.backchannel_kwargs) is None
+
+
+@pytest.mark.parametrize("command", ["serve", "local"])
+def test_backchannel_flags_build_gate_config(command):
+    args = parse_arguments(
+        [
+            "--backchannel_url",
+            "http://127.0.0.1:8093",
+            "--backchannel_threshold",
+            "0.6",
+            "--backchannel_max_hold_ms",
+            "1200",
+        ],
+        command=command,
+    )
+
+    config = build_backchannel_config(args.backchannel_kwargs)
+    assert config is not None
+    assert config.url == "http://127.0.0.1:8093"
+    assert config.threshold == 0.6
+    assert config.max_hold_ms == 1200
+    assert config.timeout_ms == 300
 
 
 @pytest.mark.parametrize(

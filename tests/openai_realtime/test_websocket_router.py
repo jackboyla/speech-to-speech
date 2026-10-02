@@ -1425,6 +1425,121 @@ class TestSendLoop:
 
 
 # ===================================================================
+# Backchannel gate
+# ===================================================================
+
+
+class _ScriptedClassifier:
+    def __init__(self, config) -> None:
+        self.scores = {"Mm-hmm.": 0.05, "Wait.": 0.95}
+
+    async def interrupt_probability(self, assistant_text: str, user_text: str) -> float:
+        return self.scores[user_text]
+
+    async def aclose(self) -> None:
+        pass
+
+
+@pytest.fixture
+def gated_setup(monkeypatch):
+    from speech_to_speech.api.openai_realtime.backchannel import BackchannelConfig
+
+    monkeypatch.setattr(router_module, "SystemOneClassifier", _ScriptedClassifier)
+    text_prompt_queue: Queue = Queue()
+    should_listen = ThreadingEvent()
+    should_listen.set()
+    service = RealtimeService(text_prompt_queue=text_prompt_queue, should_listen=should_listen)
+    unit = PipelineUnit(
+        index=0,
+        service=service,
+        cancel_scope=CancelScope(),
+        should_listen=should_listen,
+        response_playing=ThreadingEvent(),
+        input_queue=Queue(),
+        output_queue=Queue(),
+        text_output_queue=Queue(),
+        text_prompt_queue=text_prompt_queue,
+        handlers=[],
+    )
+    app = create_app(
+        pool=[unit],
+        stop_event=ThreadingEvent(),
+        backchannel_config=BackchannelConfig(url="http://unused"),
+    )
+    return app, unit
+
+
+def _user_turn(turn_id: str, transcript: str) -> list[PipelineEvent]:
+    return [
+        SpeechStartedEvent(turn_id=turn_id, turn_revision=0),
+        SpeechStoppedEvent(duration_s=0.4, turn_id=turn_id, turn_revision=0),
+        TranscriptionCompletedEvent(transcript=transcript, turn_id=turn_id, turn_revision=0),
+    ]
+
+
+def _start_playback(ws, unit: PipelineUnit, seconds: float) -> None:
+    unit.output_queue.put(_pcm_bytes(int(16000 * seconds)))
+    types = []
+    while "response.output_audio.delta" not in types:
+        types.append(ws.receive_json()["type"])
+    # Drain the remaining deltas of the batched chunk.
+    time.sleep(0.1)
+
+
+class TestBackchannelGate:
+    def test_backchannel_during_playback_does_not_interrupt(self, gated_setup):
+        app, unit = gated_setup
+        with TestClient(app) as client:
+            with client.websocket_connect("/v1/realtime") as ws:
+                ws.receive_json()  # session.created
+                conn_id = list(unit.service._conns.keys())[0]
+                _start_playback(ws, unit, seconds=0.4)
+                for event in _user_turn("turn_1", "Mm-hmm."):
+                    unit.text_output_queue.put(event)
+                time.sleep(0.2)
+
+                assert not unit.cancel_scope.discarding
+                assert unit.service._state(conn_id).in_response
+                assert unit.service.text_prompt_queue.empty()
+                # The next wire event is assistant audio, not a user item.
+                unit.output_queue.put(_pcm_bytes(160))
+                event_types = []
+                while "response.output_audio.delta" not in event_types:
+                    event_types.append(ws.receive_json()["type"])
+                assert not any(t.startswith("input_audio_buffer") for t in event_types)
+                assert "response.done" not in event_types
+
+    def test_interruption_during_playback_cancels_response(self, gated_setup):
+        app, unit = gated_setup
+        with TestClient(app) as client:
+            with client.websocket_connect("/v1/realtime") as ws:
+                ws.receive_json()  # session.created
+                _start_playback(ws, unit, seconds=0.4)
+                for event in _user_turn("turn_1", "Wait."):
+                    unit.text_output_queue.put(event)
+
+                done = None
+                event_types = []
+                while "input_audio_buffer.speech_started" not in event_types:
+                    event = ws.receive_json()
+                    event_types.append(event["type"])
+                    if event["type"] == "response.done":
+                        done = event
+                assert done is not None
+                assert done["response"]["status"] == "cancelled"
+                time.sleep(0.1)
+                assert unit.cancel_scope.discarding
+
+    def test_speech_after_playback_is_not_held(self, gated_setup):
+        app, unit = gated_setup
+        with TestClient(app) as client:
+            with client.websocket_connect("/v1/realtime") as ws:
+                ws.receive_json()  # session.created
+                unit.text_output_queue.put(SpeechStartedEvent(turn_id="turn_1", turn_revision=0))
+                assert ws.receive_json()["type"] == "input_audio_buffer.speech_started"
+
+
+# ===================================================================
 # Cleanup
 # ===================================================================
 
