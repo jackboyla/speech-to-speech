@@ -740,6 +740,31 @@ Smart Turn is enabled by default for server sessions and the packaged local clie
 Tune the completion cutoff with `--smart_turn_threshold` (default `0.5`). A higher threshold makes ambiguous
 pauses more likely to use the longer speculative response grace.
 
+### Backchannel detection
+
+By default any speech during a reply cancels it, so a "mm-hmm" or "yeah" cuts the assistant off. With
+`--backchannel_url`, a llama.cpp decision model decides whether such speech is a real interruption. While
+assistant audio is playing, the server holds a new user turn: the client sees no events for it and the
+reply goes on. The server then classifies the turn's transcript:
+
+- interruption: the held events go out as usual and the reply is cancelled;
+- backchannel: the server drops the turn and the assistant keeps talking.
+
+A partial transcript can confirm an interruption but never a backchannel, since "Okay so" reads as one
+until the user finishes. Classifier errors, failed transcription, and turns held longer than
+`--backchannel_max_hold_ms` (1500 ms by default) are treated as interruptions.
+
+The decision model needs a llama.cpp build with the `/v1/systemone` endpoint. `ggml-org/Kev-4B-GGUF`
+answers in about 20 ms on an RTX 5090 and uses 4.5 GB at `Q8_0`:
+
+```bash
+llama-server -hf ggml-org/Kev-4B-GGUF:Q8_0 --port 8093 -ngl 99 -c 4096 -np 1
+speech-to-speech serve --backchannel_url http://127.0.0.1:8093
+```
+
+Tune with `--backchannel_threshold` (default `0.5`), `--backchannel_timeout_ms` (default `300`), and
+`--backchannel_model` when one llama.cpp server hosts several models.
+
 ### STT, LLM, and TTS Parameters
 
 `model_name`, `torch_dtype`, and `device` are exposed for each STT, LLM, and TTS implementation. STT and TTS parameters use the handler prefix, for example `--stt_model_name` or `--qwen3_tts_device`. LLM model selection and chat settings are shared across backends via unprefixed flags, for example `--model_name` and `--chat_size`; backend-specific flags use the `responses_api_` prefix for the `responses-api` and `chat-completions` backends and the `llm_` prefix for local backends.
