@@ -765,6 +765,15 @@ For example:
 
 Other generation parameters can be set using the handler prefix plus `_gen_`, for example `--stt_gen_max_new_tokens 128` or `--llm_gen_temperature 0.7`. Parameters not yet exposed can be added to the relevant arguments class.
 
+## Experimental turn speculation
+
+An opt-in [prototype and benchmark](benchmarks/turn_speculation/README.md) uses
+partial transcripts to prepare an LLM cache and start read-only tools before
+final STT. It keeps results private until final validation and covers transcript
+corrections, cancellation and changed tool arguments. The default server does
+not enable it. The benchmark reports real CPU cache timings separately from
+synthetic tool-overlap timings.
+
 ## Contributing
 
 Issues and PRs are welcome. Good starting points are the [open issues](https://github.com/huggingface/speech-to-speech/issues). For larger changes, open an issue first to discuss the approach.

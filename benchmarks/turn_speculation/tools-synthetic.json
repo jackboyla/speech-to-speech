@@ -1,0 +1,149 @@
+{
+  "kind": "synthetic_tool_overlap",
+  "tool_delay_s": 1,
+  "speaking_tail_s": 0.6,
+  "limits": "Handwritten planner and asyncio.sleep tool/speech costs. Demonstrates scheduling and rejection, not real search quality or learned decisions.",
+  "rows": [
+    {
+      "scenario": "unchanged",
+      "candidate": false,
+      "post_final_ms": 1001.5356899239123,
+      "reused": false,
+      "launches": [
+        {
+          "query": "speech agents"
+        }
+      ],
+      "cancelled": [],
+      "results": [
+        {
+          "title": "Speech agents",
+          "year": 2026,
+          "query": "speech agents"
+        },
+        {
+          "title": "Older paper",
+          "year": 2025,
+          "query": "speech agents"
+        }
+      ]
+    },
+    {
+      "scenario": "unchanged",
+      "candidate": true,
+      "post_final_ms": 400.99094482138753,
+      "reused": true,
+      "launches": [
+        {
+          "query": "speech agents"
+        }
+      ],
+      "cancelled": [],
+      "results": [
+        {
+          "title": "Speech agents",
+          "year": 2026,
+          "query": "speech agents"
+        },
+        {
+          "title": "Older paper",
+          "year": 2025,
+          "query": "speech agents"
+        }
+      ]
+    },
+    {
+      "scenario": "late_filter",
+      "candidate": false,
+      "post_final_ms": 1001.2379181571305,
+      "reused": false,
+      "launches": [
+        {
+          "query": "speech agents"
+        }
+      ],
+      "cancelled": [],
+      "results": [
+        {
+          "title": "Speech agents",
+          "year": 2026,
+          "query": "speech agents"
+        }
+      ]
+    },
+    {
+      "scenario": "late_filter",
+      "candidate": true,
+      "post_final_ms": 400.7537546567619,
+      "reused": true,
+      "launches": [
+        {
+          "query": "speech agents"
+        }
+      ],
+      "cancelled": [],
+      "results": [
+        {
+          "title": "Speech agents",
+          "year": 2026,
+          "query": "speech agents"
+        }
+      ]
+    },
+    {
+      "scenario": "corrected_destination",
+      "candidate": false,
+      "post_final_ms": 1001.1563319712877,
+      "reused": false,
+      "launches": [
+        {
+          "query": "Milan"
+        }
+      ],
+      "cancelled": [],
+      "results": [
+        {
+          "title": "Speech agents",
+          "year": 2026,
+          "query": "Milan"
+        },
+        {
+          "title": "Older paper",
+          "year": 2025,
+          "query": "Milan"
+        }
+      ]
+    },
+    {
+      "scenario": "corrected_destination",
+      "candidate": true,
+      "post_final_ms": 1000.8702417835593,
+      "reused": false,
+      "launches": [
+        {
+          "query": "speech agents"
+        },
+        {
+          "query": "Milan"
+        }
+      ],
+      "cancelled": [
+        {
+          "query": "speech agents"
+        }
+      ],
+      "results": [
+        {
+          "title": "Speech agents",
+          "year": 2026,
+          "query": "Milan"
+        },
+        {
+          "title": "Older paper",
+          "year": 2025,
+          "query": "Milan"
+        }
+      ]
+    }
+  ]
+}

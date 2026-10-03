@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-03",
+  "machine": "radiance-ws",
+  "device": "cpu",
+  "threads": 4,
+  "base_commit": "81b688b452ee6b64ff5745b91985e9eb653fcc9f",
+  "python": "3.12.3",
+  "llama_cpp_commit": "c550d2f60",
+  "llama_cpp_build": 11096,
+  "docker_image": "ghcr.io/ggml-org/llama.cpp@sha256:0192ab2545efcbe79c240645e34abd8fffbe4813aedcef5a0e3a886ef6d6d82f",
+  "model": "SmolLM2-135M-Instruct-Q4_K_M.gguf",
+  "model_sha256": "2e8040ceae7815abe0dcb3540b9995eaa1fa0d2ca9e797d0a635ae4433c68c2d",
+  "benchmark_sha256": "110146f50e25f195c9873230cc134871f73a84f23fab4f7a096b8ae5f69d1655",
+  "fixture_origin": "Handwritten examples, not recorded ASR; synthetic tools."
+}
