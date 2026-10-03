@@ -1484,3 +1484,165 @@ def test_talk_client_uses_signal_driven_shutdown(monkeypatch):
         (signal.SIGINT, "previous-SIGINT"),
         (signal.SIGTERM, "previous-SIGTERM"),
     ]
+
+
+def speech_started(item_id="item_user"):
+    return SimpleNamespace(type="input_audio_buffer.speech_started", item_id=item_id)
+
+
+def transcription_completed(transcript, item_id="item_user"):
+    return SimpleNamespace(
+        type="conversation.item.input_audio_transcription.completed",
+        item_id=item_id,
+        transcript=transcript,
+    )
+
+
+def transcription_failed(item_id="item_user"):
+    return SimpleNamespace(
+        type="conversation.item.input_audio_transcription.failed",
+        item_id=item_id,
+        error=None,
+    )
+
+
+def response_cancelled(response_id, reason):
+    response = response_done(response_id, status="cancelled").response
+    response.status_details = SimpleNamespace(type="cancelled", reason=reason)
+    return SimpleNamespace(type="response.done", response=response)
+
+
+async def tool_output_during_speech(conn):
+    coordinator = _ToolCallCoordinator(
+        conn,
+        RealtimeAudioClientConfig(tools=[TOOL_DEFINITION], tool_executor=done_tool_executor),
+    )
+    coordinator.handle_event(response_created("response_1"))
+    coordinator.handle_event(speech_started())
+    coordinator.handle_event(response_done("response_1", output=[function_call("call_1")]))
+    await wait_until(lambda: len(conn.sent) == 1)
+    await asyncio.sleep(0.01)
+    assert [event["type"] for event in conn.sent] == ["conversation.item.create"]
+    return coordinator
+
+
+async def test_audio_client_holds_tool_follow_up_while_user_turn_is_open():
+    conn = RecordingConnection()
+    coordinator = await tool_output_during_speech(conn)
+
+    coordinator.handle_event(transcription_completed("And tomorrow?"))
+    await asyncio.sleep(0.01)
+    assert len(conn.sent) == 1
+
+    # The user turn's response sees the delivered output, so it replaces the
+    # separate follow-up.
+    coordinator.handle_event(response_created("response_user"))
+    coordinator.handle_event(response_done("response_user"))
+    await asyncio.sleep(0.01)
+    assert [event["type"] for event in conn.sent] == ["conversation.item.create"]
+    assert coordinator._queued_follow_ups == 0
+    await coordinator.close()
+
+
+@pytest.mark.parametrize(
+    "settle",
+    [
+        pytest.param(transcription_failed(), id="transcription-failed"),
+        pytest.param(transcription_completed(""), id="empty-transcript"),
+    ],
+)
+async def test_audio_client_sends_held_follow_up_when_user_turn_gets_no_response(settle):
+    conn = RecordingConnection()
+    coordinator = await tool_output_during_speech(conn)
+
+    coordinator.handle_event(settle)
+
+    await wait_until(lambda: len(conn.sent) == 2)
+    assert conn.sent[-1]["type"] == "response.create"
+    await coordinator.close()
+
+
+async def test_audio_client_ignores_an_earlier_items_terminal_while_user_turn_is_open():
+    conn = RecordingConnection()
+    coordinator = await tool_output_during_speech(conn)
+
+    coordinator.handle_event(transcription_failed(item_id="item_earlier"))
+    await asyncio.sleep(0.01)
+    assert len(conn.sent) == 1
+
+    coordinator.handle_event(transcription_failed())
+    await wait_until(lambda: len(conn.sent) == 2)
+    assert conn.sent[-1]["type"] == "response.create"
+    await coordinator.close()
+
+
+async def test_audio_client_holds_follow_up_from_a_barge_in_cancellation():
+    conn = RecordingConnection()
+    coordinator = _ToolCallCoordinator(
+        conn,
+        RealtimeAudioClientConfig(tools=[TOOL_DEFINITION], tool_executor=done_tool_executor),
+    )
+    coordinator.handle_event(response_created("response_1"))
+    coordinator.handle_event(response_done("response_1", output=[function_call("call_1")]))
+    coordinator.handle_event(response_created("response_2"))
+    await wait_until(lambda: len(conn.sent) == 1)
+
+    # Server VAD cancels the active response before it sends speech_started.
+    coordinator.handle_event(response_cancelled("response_2", "turn_detected"))
+    await asyncio.sleep(0.01)
+    assert [event["type"] for event in conn.sent] == ["conversation.item.create"]
+
+    coordinator.handle_event(speech_started())
+    coordinator.handle_event(response_created("response_user"))
+    coordinator.handle_event(response_done("response_user"))
+    await asyncio.sleep(0.01)
+    assert len(conn.sent) == 1
+    await coordinator.close()
+
+
+async def test_audio_client_restores_covered_follow_up_when_the_answer_is_cut_off():
+    conn = RecordingConnection()
+    coordinator = await tool_output_during_speech(conn)
+    coordinator.handle_event(response_created("response_user"))
+    assert coordinator._queued_follow_ups == 0
+
+    # Barge-in cancels the covering answer. The next turn's answer covers the
+    # output instead.
+    coordinator.handle_event(response_cancelled("response_user", "turn_detected"))
+    coordinator.handle_event(speech_started("item_next"))
+    await asyncio.sleep(0.01)
+    assert len(conn.sent) == 1
+    assert coordinator._queued_follow_ups == 1
+
+    coordinator.handle_event(response_created("response_next"))
+    coordinator.handle_event(response_done("response_next", status="failed"))
+
+    # That answer failed, so the output still gets its own follow-up.
+    await wait_until(lambda: len(conn.sent) == 2)
+    assert conn.sent[-1]["type"] == "response.create"
+    await coordinator.close()
+
+
+async def test_audio_client_keeps_follow_up_for_outputs_delivered_after_the_answer_starts():
+    release = asyncio.Event()
+
+    async def executor(_name, _arguments):
+        await release.wait()
+        return "result"
+
+    conn = RecordingConnection()
+    coordinator = _ToolCallCoordinator(
+        conn,
+        RealtimeAudioClientConfig(tools=[TOOL_DEFINITION], tool_executor=executor),
+    )
+    coordinator.handle_event(response_created("response_1"))
+    coordinator.handle_event(response_done("response_1", output=[function_call("call_1")]))
+    coordinator.handle_event(speech_started())
+    coordinator.handle_event(response_created("response_user"))
+    release.set()
+
+    await wait_until(lambda: len(conn.sent) == 1)
+    coordinator.handle_event(response_done("response_user"))
+    await wait_until(lambda: len(conn.sent) == 2)
+    assert conn.sent[-1]["type"] == "response.create"
+    await coordinator.close()
