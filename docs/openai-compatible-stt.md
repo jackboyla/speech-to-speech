@@ -170,3 +170,10 @@ speech-to-speech local \
 Set `--vllm_realtime_stt_api_key` if the server requires authentication. See
 [vLLM's Realtime API documentation](https://docs.vllm.ai/en/stable/serving/online_serving/speech_to_text/#realtime-api)
 for supported models and server configuration.
+
+### Phonon native streaming
+
+`--stt phonon` uses Phonon's separate `/v1/audio/stream` protocol. It sends raw
+PCM16 frames and handles replacement hypotheses, server segments, and a new
+connection after each utterance. See [Phonon setup and limits](phonon-streaming.md)
+and [the Parakeet comparison harness](phonon-benchmark.md).

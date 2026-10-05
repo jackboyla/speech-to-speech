@@ -308,3 +308,13 @@ worker while STT handles the finalized audio. Long idle silence is not processed
 Enable `--diarization` in `serve` or `local` to carry speaker metadata
 through STT into the LLM's conversation history. Mixed-speaker utterances are
 explicitly marked as ambiguous; live word-level attribution is not inferred.
+
+### Phonon (`--stt phonon`)
+
+- Connects to a separate Phonon server over `/v1/audio/stream`.
+- Streams mono PCM16 at 16 kHz once; publishes replacement hypotheses as partials.
+- Phonon segment finals remain partials until local VAD ends the utterance and the server sends `done`.
+- Reconnects after each utterance; supports cancellation and speculative turn revisions.
+- English only. No timestamps, prompt, or language selection.
+- One live stream per Phonon worker; use `--num_pipelines 1` with one worker.
+- Setup and limits: [Phonon streaming](../../../docs/phonon-streaming.md).
