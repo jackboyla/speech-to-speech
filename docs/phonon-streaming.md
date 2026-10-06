@@ -87,8 +87,9 @@ A busy worker, dropped connection, invalid transcript, or final timeout produces
 a typed transcription failure. The adapter does not replay audio automatically.
 Phonon permits one live stream per worker; concurrent pipelines pointed at one
 worker can fail with its busy response. Run one pipeline per worker for this
-prototype. Do not expect timestamps, prompt conditioning, or language selection:
-Phonon-2 transcribes English, reported as `en`.
+adapter. This adapter does not expose timestamps, prompt conditioning, or
+language selection. Phonon-2 transcribes English, reported as `en`. The server’s
+HTTP transcription API has other features; see its current API reference.
 
 The Realtime service already turns whole hypotheses into stable append-only
 transcript deltas. Standard clients may therefore see text later than the

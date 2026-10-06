@@ -15,6 +15,7 @@ This document summarizes the Speech-to-Text (STT) implementations in the `STT/` 
 - `paraformer` → `STT/paraformer_handler.py`
 - `qwen3-asr` → `STT/qwen3_asr_handler.py`
 - `openai` → `STT/openai_compatible_handler.py`
+- `phonon` → `STT/streaming_handler.py`
 
 ## Language Support by Handler
 
@@ -140,6 +141,16 @@ This document summarizes the Speech-to-Text (STT) implementations in the `STT/` 
 - Language flag: `--orukeet_language` (default `auto`). Fallback until text language detection returns a code, then the last detected code.
 - Device flag: `--orukeet_device` (default `auto`)
 - The pipeline downloads the NeMo file, loads it with `ASRModel.restore_from`, and transcribes each VAD utterance with `ASRModel.transcribe` (offline API)
+
+### 12) Phonon (`--stt phonon`)
+
+- Connects to a separate Phonon server over `/v1/audio/stream`.
+- Streams mono PCM16 at 16 kHz once; publishes replacement hypotheses as partials.
+- Phonon segment finals remain partials until local VAD ends the utterance and the server sends `done`.
+- Reconnects after each utterance; supports cancellation and speculative turn revisions.
+- English only. This adapter exposes text, without timestamp or prompt options.
+- One live stream per Phonon worker; use `--num_pipelines 1` with one worker.
+- Setup and limits: [Phonon streaming](../../../docs/phonon-streaming.md).
 
 ## Language Abbreviations (ISO-style codes seen in STT handlers)
 
@@ -308,13 +319,3 @@ worker while STT handles the finalized audio. Long idle silence is not processed
 Enable `--diarization` in `serve` or `local` to carry speaker metadata
 through STT into the LLM's conversation history. Mixed-speaker utterances are
 explicitly marked as ambiguous; live word-level attribution is not inferred.
-
-### Phonon (`--stt phonon`)
-
-- Connects to a separate Phonon server over `/v1/audio/stream`.
-- Streams mono PCM16 at 16 kHz once; publishes replacement hypotheses as partials.
-- Phonon segment finals remain partials until local VAD ends the utterance and the server sends `done`.
-- Reconnects after each utterance; supports cancellation and speculative turn revisions.
-- English only. No timestamps, prompt, or language selection.
-- One live stream per Phonon worker; use `--num_pipelines 1` with one worker.
-- Setup and limits: [Phonon streaming](../../../docs/phonon-streaming.md).
