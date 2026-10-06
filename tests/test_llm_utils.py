@@ -48,6 +48,7 @@ _STT_HANDLER_MODULES = [
     "speech_to_speech.STT.lightning_whisper_mlx_handler",
     "speech_to_speech.STT.faster_whisper_handler",
     "speech_to_speech.STT.qwen3_asr_handler",
+    "speech_to_speech.STT.moonshine_handler",
     "speech_to_speech.STT.nemo_asr_handler",
 ]
 
@@ -58,6 +59,7 @@ _ALWAYS_IMPORTABLE = {
     "speech_to_speech.STT.whisper_stt_handler",
     "speech_to_speech.STT.mlx_audio_whisper_handler",
     "speech_to_speech.STT.qwen3_asr_handler",
+    "speech_to_speech.STT.moonshine_handler",
     # Importable via the stub above, so a skip here would mean the stub stopped working.
     "speech_to_speech.STT.faster_whisper_handler",
     "speech_to_speech.STT.nemo_asr_handler",
