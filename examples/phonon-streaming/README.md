@@ -75,6 +75,80 @@ labeled as replay, not microphone capture.
 Apple documents the recorder and microphone option in its
 [screen-recording guide](https://support.apple.com/en-is/guide/mac-help/-mh26782/mac).
 
+## Compare against the default Parakeet baseline
+
+Use **Parakeet TDT 0.6B v3**, the repo's default STT, as the baseline. Record
+one clip and replay that exact WAV through both handlers. Separate microphone
+recordings would change the speech, timing and background sound.
+
+Before recording, write the words you will read. Do not copy either model's
+output into the reference:
+
+```bash
+mkdir -p progress
+cat > progress/reference.txt <<'TEXT'
+Today I am testing speech recognition with the same recording. Both models should transcribe these words. I will pause briefly and then finish.
+TEXT
+python examples/phonon-streaming/demo.py \
+  --seconds 20 --save-audio progress/phonon-demo.wav
+```
+
+Read those words during capture. Prepare one shared manifest:
+
+```bash
+python - <<'PYTHON'
+import json
+from pathlib import Path
+root = Path("progress")
+record = {
+    "id": "microphone-demo",
+    "audio": "phonon-demo.wav",
+    "text": (root / "reference.txt").read_text().strip(),
+}
+(root / "demo-manifest.jsonl").write_text(json.dumps(record) + "\n")
+PYTHON
+```
+
+On the Mac, run each case separately inside tmux. Both use 32 ms packets,
+a 0.5-second progressive update setting, four PyTorch threads and one excluded
+warmup. Phonon's native server controls its own partial cadence. Setup and model
+downloads are outside the timed clips. MLX keeps its native thread policy.
+
+```bash
+python scripts/benchmark_phonon.py \
+  --manifest progress/demo-manifest.jsonl \
+  --backend phonon --device mps --threads 4 --warmup 1 \
+  --chunk-ms 32 --partial-interval 0.5 \
+  --base-url ws://127.0.0.1:18090/v1 \
+  --output progress/demo-phonon.json
+```
+
+For an 8 GiB Mac, stop **your own idle** Phonon server after that case to free
+its memory before loading Parakeet. Use Ctrl+C in its server terminal or tmux
+pane. Keep user apps unchanged. Then run:
+
+```bash
+python scripts/benchmark_phonon.py \
+  --manifest progress/demo-manifest.jsonl \
+  --backend parakeet-tdt --device mps --threads 4 --warmup 1 \
+  --chunk-ms 32 --partial-interval 0.5 \
+  --output progress/demo-parakeet.json
+python scripts/summarize_phonon_comparison.py \
+  progress/demo-phonon.json progress/demo-parakeet.json
+```
+
+Restore your Phonon server afterward. On Linux, use `cpu` or `cuda` instead of
+`mps`; choose the GPU after checking existing jobs. The baseline enables
+Parakeet's live text path, matching the progressive STT use case rather than
+comparing it only in final-only mode.
+
+Record the comparison table and both final transcripts as the last part of your
+video. Describe this part as **paced replay of the same microphone recording**.
+The summary checks audio hashes, reference text, capture settings, warmup count
+and failures before comparing. Keep both JSON files as evidence. First text may
+change; final wait excludes microphone VAD, LLM and TTS. A single clip cannot
+establish a general accuracy or speed advantage.
+
 ## Attach the video
 
 Drag the recorded `.mov`, `.mp4` or `.webm` into a GitHub description or comment,

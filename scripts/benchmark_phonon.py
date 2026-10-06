@@ -57,7 +57,14 @@ def load_manifest(path: Path) -> list[dict[str, str]]:
             audio = path.parent / audio
         if not audio.is_file():
             raise ValueError(f"Missing audio at manifest line {line_number}: {audio}")
-        rows.append({"id": str(row.get("id", line_number)), "audio": str(audio.resolve()), "text": row["text"]})
+        rows.append(
+            {
+                "id": str(row.get("id", line_number)),
+                "audio": str(audio.resolve()),
+                "audio_sha256": hashlib.sha256(audio.read_bytes()).hexdigest(),
+                "text": row["text"],
+            }
+        )
     if not rows:
         raise ValueError("Manifest must contain at least one labeled file")
     return rows
@@ -275,6 +282,7 @@ def main(argv: list[str] | None = None) -> int:
         started = perf_counter()
         handler = make_handler(args)
         report["handler_startup_s"] = perf_counter() - started
+        report["model"] = getattr(handler, "model_name", None)
         for index in range(args.warmup):
             report["warmup"].append(
                 run_clip(

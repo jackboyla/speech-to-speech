@@ -22,6 +22,9 @@ def test_manifest_resolves_paths_and_requires_real_labeled_audio(tmp_path):
     manifest = tmp_path / "manifest.jsonl"
     manifest.write_text(json.dumps({"id": "clip", "audio": "clip.wav", "text": "hello"}) + "\n")
     assert load_manifest(manifest)[0]["audio"] == str(audio.resolve())
+    import hashlib
+
+    assert load_manifest(manifest)[0]["audio_sha256"] == hashlib.sha256(b"").hexdigest()
     manifest.write_text(json.dumps({"audio": "missing.wav", "text": "hello"}) + "\n")
     with pytest.raises(ValueError, match="Missing audio"):
         load_manifest(manifest)
@@ -147,3 +150,31 @@ def test_failed_warmup_sets_failure_status_even_when_measured_clip_succeeds(tmp_
     assert report["failed_clips"] == 0
     assert report["successful_clips"] == 1
     assert report["wer"] == 0
+
+
+def test_comparison_rejects_changed_audio_and_failed_runs():
+    from copy import deepcopy
+
+    from scripts.summarize_phonon_comparison import validate_pair
+
+    candidate = {
+        "backend": "phonon",
+        "machine": "mac",
+        "manifest_sha256": "manifest",
+        "benchmark_sha256": "runner",
+        "chunk_ms": 32,
+        "partial_interval_s": 0.5,
+        "threads": 4,
+        "warmup": [{}],
+        "clips": [{"id": "voice", "audio_sha256": "audio", "text": "hello", "duration_s": 1}],
+    }
+    baseline = deepcopy(candidate)
+    baseline["backend"] = "parakeet-tdt"
+    validate_pair(candidate, baseline)
+    baseline["clips"][0]["audio_sha256"] = "different"
+    with pytest.raises(ValueError, match="audio_sha256"):
+        validate_pair(candidate, baseline)
+    baseline["clips"][0]["audio_sha256"] = "audio"
+    baseline["warmup_failures"] = 1
+    with pytest.raises(ValueError, match="failures"):
+        validate_pair(candidate, baseline)

@@ -53,6 +53,11 @@ to mono 16 kHz, sends 32 ms packets and requests growing-window updates every
 punctuation and use word edit distance; no abbreviation expansion applies.
 Failed warmups and measured clips make the command exit nonzero.
 
+For your own microphone recording and a paired summary table, follow the
+[demo baseline comparison](../examples/phonon-streaming/README.md#compare-against-the-default-parakeet-baseline).
+Both reports now include the audio file hash so the summary can check that the
+models received the same recording.
+
 ## Evidence and limits
 
 The [saved evidence](https://github.com/jackboyla/speech-to-speech/tree/9b190c0040c561373bb91dfb098d47725b274f57/benchmarks/phonon/2026-10-01)
