@@ -178,11 +178,15 @@ def benchmark_handler(
             )
 
         elif handler_name == "moonshine":
-            from archive.STT.moonshine_handler import MoonshineSTTHandler
+            from speech_to_speech.STT.moonshine_handler import MoonshineSTTHandler
+            setup_kwargs = handler_kwargs or {
+                "model_name": "moonshine-ai/moonshine-streaming-medium",
+            }
             handler = MoonshineSTTHandler(
                 stop_event,
                 queue_in=queue_in,
                 queue_out=queue_out,
+                setup_kwargs=setup_kwargs
             )
 
         elif handler_name == "parakeet-tdt":

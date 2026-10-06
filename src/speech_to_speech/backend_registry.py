@@ -22,6 +22,7 @@ from speech_to_speech.arguments_classes.language_model_arguments import Language
 from speech_to_speech.arguments_classes.mlx_audio_whisper_arguments import (
     MLXAudioWhisperSTTHandlerArguments,
 )
+from speech_to_speech.arguments_classes.moonshine_stt_arguments import MoonshineSTTHandlerArguments
 from speech_to_speech.arguments_classes.nemotron_streaming_stt_arguments import (
     NemotronStreamingSTTHandlerArguments,
 )
@@ -470,6 +471,17 @@ STT_BACKENDS = build_backend_registry(
                 attach_speculative_turns=True,
             ),
             config_prefix="qwen3_asr",
+        ),
+        BackendSpec(
+            "moonshine",
+            "stt",
+            MoonshineSTTHandlerArguments,
+            _simple_handler_factory(
+                "speech_to_speech.STT.moonshine_handler",
+                "MoonshineSTTHandler",
+                attach_speculative_turns=True,
+            ),
+            config_prefix="moonshine",
         ),
         BackendSpec(
             "openai",

@@ -14,6 +14,7 @@ This document summarizes the Speech-to-Text (STT) implementations in the `STT/` 
 - `orukeet` → `STT/nemo_asr_handler.py`
 - `paraformer` → `STT/paraformer_handler.py`
 - `qwen3-asr` → `STT/qwen3_asr_handler.py`
+- `moonshine` → `STT/moonshine_handler.py`
 - `openai` → `STT/openai_compatible_handler.py`
 
 ## Language Support by Handler
@@ -95,7 +96,22 @@ This document summarizes the Speech-to-Text (STT) implementations in the `STT/` 
   - A forced language is passed on every request and reported as is
 - The required Transformers version supports the prompt and explicit language forcing on all platforms.
 
-### 8) OpenAI-compatible endpoint (`--stt openai`)
+### 8) Moonshine (`--stt moonshine`)
+
+- Handler: `MoonshineSTTHandler`
+- Model flag: `--moonshine_model_name` (default `moonshine-ai/moonshine-streaming-medium`)
+  - Streaming checkpoints: `moonshine-ai/moonshine-streaming-{tiny,small,medium}` (34M, 123M, 245M parameters)
+  - Older checkpoints: `moonshine-ai/moonshine-tiny`, `moonshine-ai/moonshine-base`
+  - Language checkpoints: `moonshine-ai/moonshine-tiny-ja`, `moonshine-ai/moonshine-base-ko`, `moonshine-ai/moonshine-streaming-tiny-es`, and others
+- Language flag: `--moonshine_language` (optional ISO code)
+- Supported languages: each checkpoint knows one
+  - `en`, `ar`, `es`, `ja`, `ko`, `uk`, `vi`, `zh`
+- Behavior:
+  - Without `--moonshine_language`, the handler reads the language from the checkpoint name suffix (`-ja` gives `ja`) and reports `en` when there is none
+  - Caps the tokens per request at `--moonshine_max_tokens_per_second` (default 6.5) times the audio length, as the model card advises, because the decoder can repeat itself on short or noisy audio. Raise it for languages that need more tokens per second
+- Transformers runs Moonshine Streaming as a whole-utterance model; it does not stream inside a turn. Live transcription works through the usual progressive windows
+
+### 9) OpenAI-compatible endpoint (`--stt openai`)
 
 - Handler: `OpenAICompatibleSTTHandler`
 - Endpoint: `POST /v1/audio/transcriptions`
@@ -108,7 +124,7 @@ This document summarizes the Speech-to-Text (STT) implementations in the `STT/` 
 - Endpoint capacity and provider quotas remain the inference service/proxy's responsibility
 - See [`docs/openai-compatible-stt.md`](../../../docs/openai-compatible-stt.md)
 
-### 9) Parakeet Unified (`--stt parakeet-unified`)
+### 10) Parakeet Unified (`--stt parakeet-unified`)
 
 - Handler: `NemoASRSTTHandler`
 - Install: `pip install "speech-to-speech[nemo]"`
@@ -118,7 +134,7 @@ This document summarizes the Speech-to-Text (STT) implementations in the `STT/` 
 - Device flag: `--parakeet_unified_device` (default `auto`)
 - The pipeline transcribes each VAD utterance with NeMo `ASRModel.transcribe` (offline API)
 
-### 10) Nemotron Streaming (`--stt nemotron-streaming`)
+### 11) Nemotron Streaming (`--stt nemotron-streaming`)
 
 - Handler: `NemoASRSTTHandler`
 - Install: `pip install "speech-to-speech[nemo]"`
@@ -130,7 +146,7 @@ This document summarizes the Speech-to-Text (STT) implementations in the `STT/` 
 - Device flag: `--nemotron_streaming_device` (default `auto`)
 - The English and multilingual checkpoints use NeMo `ASRModel.transcribe`. The Persian checkpoint uses cache-aware inference with the trained `fa-IR` prompt and always reports `fa`.
 
-### 11) Orukeet (`--stt orukeet`)
+### 12) Orukeet (`--stt orukeet`)
 
 - Handler: `NemoASRSTTHandler`
 - Install: `pip install "speech-to-speech[nemo]"`
@@ -174,6 +190,8 @@ This document summarizes the Speech-to-Text (STT) implementations in the `STT/` 
 | `et` | Estonian |
 | `lv` | Latvian |
 | `lt` | Lithuanian |
+| `ar` | Arabic |
+| `vi` | Vietnamese |
 | `auto` | Per-utterance automatic language detection |
 
 ## Usage Examples
@@ -235,6 +253,14 @@ speech-to-speech serve --stt qwen3-asr --qwen3_asr_language fr
 speech-to-speech serve --stt qwen3-asr \
   --qwen3_asr_model_name Qwen/Qwen3-ASR-1.7B-hf \
   --qwen3_asr_prompt "Vocabulary: Quilter, apostle."
+```
+
+### Moonshine
+
+```bash
+speech-to-speech serve --stt moonshine
+speech-to-speech serve --stt moonshine --moonshine_model_name moonshine-ai/moonshine-streaming-tiny
+speech-to-speech serve --stt moonshine --moonshine_model_name moonshine-ai/moonshine-tiny-ja
 ```
 
 ### Parakeet Unified
