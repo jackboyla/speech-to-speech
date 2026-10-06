@@ -98,6 +98,12 @@ handler's first partial. Clients that opt into
 see the latest whole hypothesis, including word corrections. The final
 `completed.transcript` remains authoritative for both paths.
 
+## Microphone demo
+
+For live terminal text and a video you can attach to a PR, see the
+[microphone demo](../examples/phonon-streaming/README.md). It uses this handler
+with a timed capture boundary; it does not run the LLM or TTS.
+
 ## Verify and measure
 
 ```bash
