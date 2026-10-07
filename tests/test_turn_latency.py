@@ -21,6 +21,7 @@ def test_turn_latency_tracker_format_log_line() -> None:
         stt_s=0.14,
         llm_ttft_s=0.11,
         llm_s=1.28,
+        llm_rounds=1,
         tts_ttfa_s=0.16,
         e2e_s=1.61,
         mlx_lock_wait_s=0.0,
@@ -28,7 +29,7 @@ def test_turn_latency_tracker_format_log_line() -> None:
     )
     assert (
         tracker.format_log_line()
-        == "Turn turn_1 rev=0 latency: stt=0.14s llm=1.28s tts_ttfa=0.16s e2e=1.61s vad_decision=n/a hold=n/a smart_turn_status=n/a status=completed"
+        == "Turn turn_1 rev=0 latency: stt=0.14s llm=1.28s llm_total=1.28s llm_rounds=1 tts_ttfa=0.16s e2e=1.61s vad_decision=n/a hold=n/a smart_turn_status=n/a status=completed"
         + (" mlx_lock_wait=0.00s" if sys.platform == "darwin" else "")
     )
 
@@ -38,6 +39,7 @@ def test_turn_latency_tracker_record() -> None:
     tracker.record_stt(0.5)
     tracker.record_llm_ttft(0.3)
     tracker.record_llm_ttft(1.0)
+    tracker.start_llm()
     tracker.record_llm(2.0)
     tracker.record_tts_ttfa(0.2)
     tracker.record_e2e(3.0)
@@ -156,6 +158,7 @@ def test_configured_grace_is_not_reported_as_wait_without_a_gate(monkeypatch) ->
 def test_turn_latency_store_pop_and_clear_session() -> None:
     store = TurnLatencyStore()
     tracker = store.get_or_create_response("resp_a", turn_id="turn_1", turn_revision=0, session_id="sess_1")
+    tracker.start_llm()
     tracker.record_llm(1.0)
 
     popped = store.pop("resp_a", session_id="sess_1")
@@ -221,6 +224,77 @@ def test_log_platform_and_export_fields(monkeypatch):
         "smart_status",
         "stt_s",
         "llm_s",
+        "llm_total_s",
+        "llm_rounds",
         "tts_ttfa_s",
         "hold_s",
     }
+
+
+def test_llm_chain_tracks_only_explicit_same_session_and_revision_parents():
+    store = TurnLatencyStore()
+    first = store.get_or_create_response("first", turn_id="turn", turn_revision=0, session_id="s")
+    first.start_llm()
+    first.record_llm(0.7)
+    store.pop("first", session_id="s", keep_for_followup=True)
+    second = store.get_or_create_response(
+        "second", turn_id="turn", turn_revision=0, session_id="s", parent_response_key="first"
+    )
+    second.start_llm()
+    second.record_llm(0.9)
+    store.pop("second", session_id="s", keep_for_followup=True)
+    third = store.get_or_create_response(
+        "third", turn_id="turn", turn_revision=0, session_id="s", parent_response_key="second"
+    )
+    third.start_llm()
+    third.record_llm(0.8)
+    assert third.metadata_payload(response_key="third", status="completed")["llm_total_s"] == 2.4
+    assert third.llm_rounds == 3
+    assert third.llm_s == 0.8
+    assert third.stt_s is None
+    for key, session, revision, parent in (
+        ("unrelated", "s", 0, None),
+        ("revision", "s", 1, "second"),
+        ("session", "other", 0, "second"),
+    ):
+        tracker = store.get_or_create_response(
+            key, turn_id="turn", turn_revision=revision, session_id=session, parent_response_key=parent
+        )
+        tracker.start_llm()
+        tracker.record_llm(0.2)
+        assert tracker.llm_total_s == 0.2
+        assert tracker.llm_rounds == 1
+    store.clear_session("s")
+    fresh = store.get_or_create_response(
+        "fresh", turn_id="turn", turn_revision=0, session_id="s", parent_response_key="second"
+    )
+    assert fresh.llm_total_s is None
+    assert fresh.llm_rounds == 0
+
+
+def test_llm_chain_completed_snapshots_are_bounded_and_failed_work_is_not_retained():
+    store = TurnLatencyStore()
+    for index in range(130):
+        key = f"tool_{index}"
+        tracker = store.get_or_create_response(key, turn_id="turn", turn_revision=0, session_id="s")
+        tracker.start_llm()
+        tracker.record_llm(0.1)
+        store.pop(key, session_id="s", keep_for_followup=True)
+    assert len(store._completed_tools) == 128
+    assert ("s", "tool_0") not in store._completed_tools
+    # A cancelled worker cannot alter the snapshot after a response finishes.
+    tracker.record_llm(9.0)
+    followup = store.get_or_create_response(
+        "followup", turn_id="turn", turn_revision=0, session_id="s", parent_response_key="tool_129"
+    )
+    assert followup.llm_total_s == 0.1
+    followup.start_llm()
+    followup.record_llm(0.2)
+    store.discard_response("followup", session_id="s")
+    replacement = store.get_or_create_response(
+        "replacement", turn_id="turn", turn_revision=0, session_id="s", parent_response_key="followup"
+    )
+    assert replacement.llm_total_s is None
+    assert replacement.llm_rounds == 0
+    store.clear_session("s")
+    assert store._completed_tools == {}

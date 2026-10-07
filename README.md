@@ -349,7 +349,8 @@ The compose file starts a llama.cpp server with Gemma 4 and the Realtime server,
 ## Realtime API
 
 The server logs per-response STT, LLM, first TTS audio, and speech-to-audio
-durations for supported backends, including vLLM-backed STT and TTS. See the
+durations for supported backends, including vLLM-backed STT and TTS. Tool-assisted
+replies also report total LLM time and the number of model rounds. See the
 [response latency guide](./docs/response-latency.md) for the coverage matrix
 and measurement boundaries.
 
@@ -794,6 +795,16 @@ uv run pytest tests -q
 uv run ruff check src tests
 uv run ruff format --check src tests
 uv run mypy src
+```
+
+To check response timing aggregation and its demo display:
+
+```bash
+CUDA_VISIBLE_DEVICES='' uv run pytest tests/test_turn_latency.py tests/openai_realtime/test_turn_latency.py tests/openai_realtime/test_server_turn_latency.py -q
+npm ci --prefix demo --no-audit --no-fund
+npx --prefix demo playwright install chromium
+node --test demo/tests/turn-latency.test.mjs
+npm --prefix demo run test:ui
 ```
 
 To check turn ordering, Smart Turn timing, and Realtime routing on CPU:

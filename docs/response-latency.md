@@ -5,7 +5,7 @@ includes its turn, revision, response key, terminal status, and available stage
 durations:
 
 ```text
-Turn turn_3 rev=0 latency: stt=0.18s llm=1.24s tts_ttfa=0.12s e2e=2.01s vad_decision=0.36s hold=0.24s smart_turn_status=complete status=completed response_key=...
+Turn turn_3 rev=0 latency: stt=0.18s llm=1.24s llm_total=1.24s llm_rounds=1 tts_ttfa=0.12s e2e=2.01s vad_decision=0.36s hold=0.24s smart_turn_status=complete status=completed response_key=...
 ```
 
 The same record is available with `speech-to-speech local` and
@@ -19,7 +19,7 @@ reserved `response.metadata["speech_to_speech.turn_latency"]` key. Realtime
 metadata values are strings, so the value is compact JSON with this schema:
 
 ```json
-{"e2e_s":2.013482,"hold_s":0.24,"llm_s":1.241907,"response_key":"...","smart_status":"complete","status":"completed","stt_s":0.181284,"tts_ttfa_s":0.121775,"turn_id":"turn_3","turn_revision":0,"vad_decision_s":0.36,"version":2}
+{"e2e_s":2.013482,"hold_s":0.24,"llm_rounds":1,"llm_s":1.241907,"llm_total_s":1.241907,"response_key":"...","smart_status":"complete","status":"completed","stt_s":0.181284,"tts_ttfa_s":0.121775,"turn_id":"turn_3","turn_revision":0,"vad_decision_s":0.36,"version":2}
 ```
 
 Version 2 changes `e2e_s` from VAD handoff to **estimated speech end** to
@@ -61,6 +61,26 @@ the existing MLX lock and can be zero when that lock is not used.
   before its transcript is yielded.
 - `llm` covers full generation, from serialization and provider request through
   consumption of provider output. It is recorded even if the request fails.
+  `llm_s` describes this response key only, including its serialization, provider
+  transfer/waits, and any model lock wait; it does not describe earlier tool rounds.
+- `llm_total_s` sums measured LLM generation durations across the initial request
+  and its tool-result follow-ups. It excludes tool execution and waits between
+  requests. Three generations of 0.7s, 0.9s and 0.8s produce 2.4s total, while
+  the last response's `llm_s` remains 0.8s. Totals use nine decimal places in
+  metadata. Stages overlap; this total is not an additive E2E breakdown.
+- `llm_rounds` counts model requests in that chain. A direct answer has one;
+  a tool request followed by an answer has two. Parallel tools within one
+  generation count as one round. Queued work, empty provider input, and local
+  prompt preparation failures do not count as model requests. A failed or
+  interrupted model request counts once it starts. Totals include only durations
+  measured by the terminal event: cancellation can arrive before a running
+  worker records its duration, so that duration remains unavailable and late
+  measurements cannot change the terminal record. Failed or discarded prefetch
+  work does not become part of a replacement reply's chain.
+
+  The fields are optional additions to version 2. Older records remain readable;
+  the demo labels `llm_s` as **LLM for this response**, never as a total. Missing
+  totals and round counts appear as unavailable, with no assumed one-round count.
 - `tts_ttfa` starts when synthesis of the first text segment begins and ends
   when the first provider audio samples arrive. For HTTP TTS, WAV headers are
   excluded, and resampling and output block assembly happen afterward.
@@ -90,7 +110,11 @@ the existing MLX lock and can be zero when that lock is not used.
 
 Tool follow-ups have separate response keys and do not repeat the originating
 turn's VAD/Smart Turn measurements. Their E2E retains the originating speech-end
-timestamp and therefore includes intervening tool work. Stages overlap; do not
+timestamp and therefore includes intervening tool work. Only explicit tool
+origins in the same session, turn and revision carry LLM totals; a shared turn
+identity alone does not join responses. Successful tool responses retain at most
+128 timing records per session for delayed follow-ups; session teardown removes
+these records. Cancellation and failure do not seed new chains. Stages overlap; do not
 sum them to reconstruct E2E. Configured grace and delay and Smart Turn analysis
 are no longer part of the terminal timing record.
 

@@ -435,12 +435,14 @@ class RealtimeService:
         *,
         turn_id: str | None = None,
         turn_revision: int | None = None,
+        parent_response_key: str | None = None,
     ) -> None:
         self.turn_latency_store.get_or_create_response(
             response_key,
             turn_id=turn_id,
             turn_revision=turn_revision,
             session_id=conn_id,
+            parent_response_key=parent_response_key,
         )
 
     # ── Client event parsing ─────────────────────

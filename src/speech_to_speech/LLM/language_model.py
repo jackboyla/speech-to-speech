@@ -70,7 +70,7 @@ from speech_to_speech.pipeline.messages import (
 )
 from speech_to_speech.pipeline.speculative_turns import SpeculativeTurnTracker
 from speech_to_speech.pipeline.transcript_logging import log_exception, transcript_for_log
-from speech_to_speech.pipeline.turn_latency import bind_active_turn_latency_tracker
+from speech_to_speech.pipeline.turn_latency import active_turn_latency_tracker, bind_active_turn_latency_tracker
 from speech_to_speech.utils.utils import is_out_of_band, response_wants_audio
 
 try:
@@ -878,6 +878,9 @@ class LanguageModelHandler(BaseLanguageModelHandler):
 
         if self.backend == "mlx":
             with MLXLockContext(handler_name="MLX-LLM", timeout=10.0):
+                tracker = active_turn_latency_tracker()
+                if tracker is not None:
+                    tracker.start_llm()
                 token_iter = mlx_stream_generate(
                     self.model,  # type: ignore[arg-type]
                     self.tokenizer,  # type: ignore[arg-type]
@@ -908,9 +911,12 @@ class LanguageModelHandler(BaseLanguageModelHandler):
             if ctx.prefetch_transaction is not None:
                 ctx.prefetch_transaction.register_abort(self._cancel_criteria.cancel)
             lock = self._transformers_lock
+            tracker = active_turn_latency_tracker()
 
             def _locked_pipe() -> None:
                 with lock:
+                    if tracker is not None:
+                        tracker.start_llm()
                     self.pipe(chat_prompt, **self.gen_kwargs)
 
             thread = Thread(target=_locked_pipe)
@@ -1064,6 +1070,9 @@ class VisionLanguageModelHandler(BaseLanguageModelHandler):
             logger.debug("MLX VLM prompt token count: %d", ctx.input_tokens)
 
             with MLXLockContext(handler_name="MLX-VLM", timeout=10.0):
+                tracker = active_turn_latency_tracker()
+                if tracker is not None:
+                    tracker.start_llm()
                 token_iter = mlx_vlm_stream_generate(  # type: ignore[arg-type]
                     self.model,
                     self.processor,
@@ -1103,9 +1112,12 @@ class VisionLanguageModelHandler(BaseLanguageModelHandler):
                 "stopping_criteria": StoppingCriteriaList([self._cancel_criteria]),
             }
             lock = self._transformers_lock
+            tracker = active_turn_latency_tracker()
 
             def _locked_generate() -> None:
                 with lock:
+                    if tracker is not None:
+                        tracker.start_llm()
                     self.model.generate(**generate_kwargs)  # type: ignore[union-attr,operator]
 
             thread = Thread(target=_locked_generate)

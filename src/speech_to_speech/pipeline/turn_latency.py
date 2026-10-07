@@ -39,8 +39,7 @@ class TurnLatencyTracker:
     at the first model audio chunk before trimming and block assembly;
     ``e2e_s`` runs from estimated speech end to first yielded TTS audio.
     TTFT remains an internal measurement, omitted from the simplified record.
-    Tool follow-ups use separate
-    trackers.
+    Tool follow-ups use separate trackers with explicit cumulative LLM ancestry.
     """
 
     turn_id: str | None = None
@@ -48,6 +47,9 @@ class TurnLatencyTracker:
     stt_s: float | None = None
     llm_ttft_s: float | None = None
     llm_s: float | None = None
+    llm_rounds: int = 0
+    _prior_llm_s: float | None = None
+    _prior_llm_rounds: int = 0
     tts_ttfa_s: float | None = None
     e2e_s: float | None = None
     vad_decision_s: float | None = None
@@ -62,6 +64,16 @@ class TurnLatencyTracker:
 
     def record_stt(self, seconds: float) -> None:
         self.stt_s = max(0.0, seconds)
+
+    def start_llm(self) -> None:
+        """Count a generation attempt, never a queued response or a tool call."""
+        self.llm_rounds = self._prior_llm_rounds + 1
+
+    @property
+    def llm_total_s(self) -> float | None:
+        if self.llm_s is None or self.llm_rounds == self._prior_llm_rounds:
+            return self._prior_llm_s
+        return (self._prior_llm_s or 0.0) + self.llm_s
 
     def record_llm(self, seconds: float) -> None:
         self.llm_s = max(0.0, seconds)
@@ -116,6 +128,8 @@ class TurnLatencyTracker:
             "response_key": response_key,
             "stt_s": self.stt_s,
             "llm_s": self.llm_s,
+            "llm_total_s": compact(self.llm_total_s),
+            "llm_rounds": self.llm_rounds,
             "tts_ttfa_s": self.tts_ttfa_s,
             "e2e_s": self.e2e_s,
             "vad_decision_s": compact(self.vad_decision_s),
@@ -151,12 +165,21 @@ class TurnLatencyTracker:
             f"Turn {self.turn_id} rev={revision} latency: "
             f"stt={self._fmt(self.stt_s)} "
             f"llm={self._fmt(self.llm_s)} "
+            f"llm_total={self._fmt(self.llm_total_s)} llm_rounds={self.llm_rounds} "
             f"tts_ttfa={self._fmt(self.tts_ttfa_s)} e2e={self._fmt(self.e2e_s)} "
             f"vad_decision={self._fmt(self.vad_decision_s)} "
             f"hold={self._fmt(self.smart_turn_wait_s)} "
             f"smart_turn_status={self.smart_turn_status or 'n/a'} "
             f"status={self.status}{mlx_wait}"
         )
+
+
+@dataclass(frozen=True)
+class _LLMChain:
+    turn_id: str | None
+    turn_revision: int | None
+    llm_total_s: float | None
+    llm_rounds: int
 
 
 class TurnLatencyStore:
@@ -167,6 +190,10 @@ class TurnLatencyStore:
 
     STT runs before a response_key exists, so interim measurements are held on
     a per-turn pending slot and merged when the response tracker is created.
+
+    Completed tool responses retain at most 128 immutable LLM snapshots per
+    session. Only an explicit parent key with matching turn/revision inherits
+    them; STT and VAD/Smart Turn timings never carry to the follow-up.
 
     Session cleanup: response trackers are indexed by ``session_id`` so
     ``unregister`` can drop only that session's in-flight measurements.
@@ -182,6 +209,7 @@ class TurnLatencyStore:
         self._pending_turn: dict[tuple[str, int], TurnLatencyTracker] = {}
         self._turn_responses: dict[tuple[str, int], str] = {}
         self._session_keys: dict[str, set[str]] = defaultdict(set)
+        self._completed_tools: dict[tuple[str, str], _LLMChain] = {}
 
     @staticmethod
     def _turn_key(turn_id: str, turn_revision: int | None) -> tuple[str, int]:
@@ -224,12 +252,27 @@ class TurnLatencyStore:
         turn_id: str | None = None,
         turn_revision: int | None = None,
         session_id: str | None = None,
+        parent_response_key: str | None = None,
     ) -> TurnLatencyTracker:
         with self._lock:
             tracker = self._trackers.get(response_key)
             if tracker is None:
                 revision = None if turn_revision is None else turn_revision
                 tracker = TurnLatencyTracker(turn_id=turn_id, turn_revision=revision)
+                if session_id is not None and parent_response_key is not None:
+                    parent = (
+                        self._trackers.get(parent_response_key)
+                        if parent_response_key in self._session_keys.get(session_id, set())
+                        else self._completed_tools.get((session_id, parent_response_key))
+                    )
+                    if (
+                        parent is not None
+                        and turn_id is not None
+                        and (parent.turn_id, parent.turn_revision) == (turn_id, turn_revision)
+                    ):
+                        tracker._prior_llm_s = parent.llm_total_s
+                        tracker._prior_llm_rounds = parent.llm_rounds
+                        tracker.llm_rounds = parent.llm_rounds
                 self._trackers[response_key] = tracker
                 if session_id is not None:
                     self._session_keys[session_id].add(response_key)
@@ -265,7 +308,9 @@ class TurnLatencyStore:
         with self._lock:
             return self._trackers.get(response_key)
 
-    def pop(self, response_key: str | None, *, session_id: str | None = None) -> TurnLatencyTracker | None:
+    def pop(
+        self, response_key: str | None, *, session_id: str | None = None, keep_for_followup: bool = False
+    ) -> TurnLatencyTracker | None:
         if response_key is None:
             return None
         with self._lock:
@@ -275,6 +320,13 @@ class TurnLatencyStore:
                 if self._turn_responses.get(key) == response_key:
                     self._turn_responses.pop(key, None)
             if session_id is not None:
+                if keep_for_followup and tracker is not None:
+                    self._completed_tools[(session_id, response_key)] = _LLMChain(
+                        tracker.turn_id, tracker.turn_revision, tracker.llm_total_s, tracker.llm_rounds
+                    )
+                    keys = [key for key in self._completed_tools if key[0] == session_id]
+                    for completed_key in keys[:-128]:
+                        self._completed_tools.pop(completed_key)
                 self._detach_response_from_session(session_id, response_key)
             return tracker
 
@@ -283,6 +335,8 @@ class TurnLatencyStore:
 
     def clear_session(self, session_id: str) -> None:
         with self._lock:
+            for completed_key in [key for key in self._completed_tools if key[0] == session_id]:
+                self._completed_tools.pop(completed_key)
             for response_key in self._session_keys.pop(session_id, set()):
                 tracker = self._trackers.pop(response_key, None)
                 if tracker is not None and tracker.turn_id is not None:

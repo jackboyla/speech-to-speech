@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from openai.types.realtime import (
     ConversationItem,
     RealtimeConversationItemFunctionCall,
+    RealtimeConversationItemFunctionCallOutput,
     RealtimeResponse,
     ResponseAudioDeltaEvent,
     ResponseAudioDoneEvent,
@@ -92,7 +93,13 @@ class ResponseHandler(RealtimeBaseHandler):
 
     def _log_turn_latency(self, st: ConnState, status: _ResponseStatus, response_key: str | None) -> None:
         assert status != "in_progress", "Latency is only finalized for terminal responses"
-        tracker = self._service.turn_latency_store.pop(response_key, session_id=st.session_id)
+        tracker = self._service.turn_latency_store.pop(
+            response_key,
+            session_id=st.session_id,
+            keep_for_followup=status == "completed"
+            and bool(st.pending_function_calls)
+            and not is_out_of_band(st.current_response_params),
+        )
         if tracker is None or tracker.turn_id is None:
             return
         tracker.status = status
@@ -231,6 +238,7 @@ class ResponseHandler(RealtimeBaseHandler):
             request.response_key,
             turn_id=request.turn_id,
             turn_revision=request.turn_revision,
+            parent_response_key=origin_response_key,
         )
         st.tool_followup_prefetch_request = request
         st.tool_followup_prefetch_origin_response_key = origin_response_key
@@ -780,6 +788,11 @@ class ResponseHandler(RealtimeBaseHandler):
                     return claimed
                 prefetch_request = None
         replacing_prefetch = prefetch_request is not None
+        parent_response_key = st.tool_followup_prefetch_origin_response_key
+        if parent_response_key is None:
+            parent_response_key = next(iter(st.generation_done_tool_calls), None)
+            if parent_response_key is None:
+                parent_response_key = next(reversed(st.completed_tool_response_keys), None)
         if st.in_response or (st.response_pending and not replacing_prefetch):
             return self.make_error(
                 message="Cannot create response while another response is in progress or pending.",
@@ -844,11 +857,15 @@ class ResponseHandler(RealtimeBaseHandler):
             speech_stopped_at_s=None if out_of_band else speech_stopped_at_s,
         )
         if not out_of_band:
+            history = cfg.chat.copy().buffer
+            if not history or not isinstance(history[-1], RealtimeConversationItemFunctionCallOutput):
+                parent_response_key = None
             self._service.bind_response_latency_tracker(
                 conn_id,
                 request.response_key,
                 turn_id=request.turn_id,
                 turn_revision=request.turn_revision,
+                parent_response_key=parent_response_key,
             )
         st.in_response = True
         st.clear_pending_response(request.response_key)
