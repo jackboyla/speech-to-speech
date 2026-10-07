@@ -296,7 +296,7 @@ pip install "speech-to-speech[wakeword]"
 speech-to-speech local --wake-word hey_jarvis
 ```
 
-The client detects the word itself with [openWakeWord](https://github.com/dscripka/openWakeWord), the detector Home Assistant uses, and sends audio from the wake word onward. You can say the request in the same breath ("Hey Jarvis, what's the weather?"); the wake word stays out of the transcript. The client goes back to waiting once nobody has spoken, no response is running, and nothing has played for `--wake-word-timeout` seconds (default 8), so follow-up questions in a conversation need no wake word.
+The client detects the word itself with [openWakeWord](https://github.com/dscripka/openWakeWord), the detector Home Assistant uses, and sends audio from the wake word onward. You can say the request in the same breath ("Hey Jarvis, what's the weather?"); the wake word stays out of the transcript. The client goes back to waiting once nobody has spoken, no response is running, and nothing has played for `--wake-word-timeout` seconds (default 8), so follow-up questions in a conversation need no wake word. It also waits for the microphone to go quiet, so a question started just as the time runs out still reaches the server.
 
 Built-in words are `alexa`, `hey_jarvis`, `hey_mycroft`, `hey_rhasspy`, and `okay_nabu`. For another word, pass the path to an openWakeWord `.tflite` model, such as one from the [community collection](https://github.com/fwartner/home-assistant-wakewords-collection). If it wakes by mistake, raise `--wake-word-threshold` (default 0.5); if it misses you, lower it.
 

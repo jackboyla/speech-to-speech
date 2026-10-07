@@ -8,6 +8,7 @@ streams until the conversation has been quiet for a while.
 from __future__ import annotations
 
 import time
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
@@ -17,6 +18,18 @@ import numpy as np
 WAKE_WORD_SAMPLE_RATE = 16000
 # Measured on synthetic speech: 250 ms restores a clipped first word; 375 ms starts to leak the wake word.
 WAKE_PREROLL_MS = 250
+# The server confirms speech only after min_speech_ms of it, so the client
+# cannot rely on speech_started alone before it stops sending. It also keeps
+# sending while the microphone is loud, until it has been quiet this long...
+_QUIET_BEFORE_SLEEP_S = 0.3
+# ...unless the noise lasts this long without the server confirming speech.
+_UNCONFIRMED_LOUD_S = 2.0
+# A chunk is loud when it is this many times the noise floor, the 10th
+# percentile of chunk levels over the last few seconds.
+_LOUD_RATIO = 3.0
+_NOISE_FLOOR_CHUNKS = 64
+# Below this RMS (int16 units, about -56 dBFS) a chunk is never loud.
+_MIN_LOUD_RMS = 50.0
 _MISSING_EXTRA = 'Wake word detection needs the wakeword extra: pip install "speech-to-speech[wakeword]"'
 
 
@@ -90,7 +103,7 @@ class WakeWordGate:
     little after the wake word ends, and without it the first word of a
     request said in one breath gets clipped. Awake, chunks are sent until
     ``timeout_s`` passes with no user speech, no response in progress, and no
-    audio playing.
+    audio playing, and the microphone has gone quiet.
     """
 
     def __init__(
@@ -113,6 +126,9 @@ class WakeWordGate:
         self._user_speaking = False
         self._response_active = False
         self._last_activity = 0.0
+        self._levels: deque[float] = deque(maxlen=_NOISE_FLOOR_CHUNKS)
+        self._loud_since: float | None = None
+        self._last_loud = float("-inf")
         self.awake = False
         self._announce_sleep()
 
@@ -124,10 +140,13 @@ class WakeWordGate:
 
         now = self._clock()
         if self.awake:
+            mic_busy = self._mic_busy(chunk, now)
             if self._user_speaking or self._response_active or self._playback_active():
                 self._last_activity = now
-            elif now - self._last_activity >= self._timeout_s:
+            elif now - self._last_activity >= self._timeout_s and not mic_busy:
                 self.awake = False
+                self._levels.clear()
+                self._loud_since = None
                 self._announce_sleep()
                 return b""
             return chunk
@@ -143,6 +162,21 @@ class WakeWordGate:
         preroll = bytes(self._preroll)
         self._preroll.clear()
         return preroll
+
+    def _mic_busy(self, chunk: bytes, now: float) -> bool:
+        """Whether the microphone may hold speech the server has not confirmed yet."""
+
+        samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32)
+        level = float(np.sqrt(np.mean(samples**2))) if samples.size else 0.0
+        self._levels.append(level)
+        floor = float(np.percentile(self._levels, 10))
+        if level > max(_MIN_LOUD_RMS, floor * _LOUD_RATIO):
+            if self._loud_since is None:
+                self._loud_since = now
+            self._last_loud = now
+        elif now - self._last_loud >= _QUIET_BEFORE_SLEEP_S:
+            self._loud_since = None
+        return self._loud_since is not None and now - self._loud_since < _UNCONFIRMED_LOUD_S
 
     def handle_event(self, event: Any) -> None:
         if event.type == "input_audio_buffer.speech_started":

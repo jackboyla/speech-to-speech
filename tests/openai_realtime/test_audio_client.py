@@ -282,12 +282,18 @@ def test_audio_client_wake_word_requires_the_extra(monkeypatch):
 
 
 def test_wake_word_gate_sends_audio_from_the_wake_word_until_the_conversation_idles(capsys):
+    import numpy as np
+
+    quiet = bytes(2048)
+    loud = (np.sin(np.arange(1024) / 3) * 3000).astype(np.int16).tobytes()
+    wake = (np.sin(np.arange(1024) / 5) * 3000).astype(np.int16).tobytes()
+
     class FakeDetector:
         def __init__(self):
             self.resets = 0
 
         def detect(self, audio):
-            return audio == b"WAKE"
+            return audio == wake
 
         def reset(self):
             self.resets += 1
@@ -295,37 +301,55 @@ def test_wake_word_gate_sends_audio_from_the_wake_word_until_the_conversation_id
     now = [0.0]
     playing = [False]
     detector = FakeDetector()
-    # 250 ms of pre-roll at 4 Hz is one sample: the last 2 bytes before the wake.
     gate = WakeWordGate(
         detector,
         wake_word="hey_jarvis",
         timeout_s=5.0,
-        sample_rate=4,
+        sample_rate=16000,
         playback_active=lambda: playing[0],
         clock=lambda: now[0],
     )
 
-    assert gate.filter(b"chat") == b""
-    assert gate.filter(b"WAKE") == b"KE"
+    def event(event_type):
+        gate.handle_event(SimpleNamespace(type=event_type))
+
+    def sends(chunk, at):
+        now[0] = at
+        return gate.filter(chunk) == chunk
+
+    # Asleep: nothing is sent; waking sends the 250 ms pre-roll, wake word included.
+    assert not sends(loud, 0.0)
+    now[0] = 0.1
+    assert gate.filter(wake) == loud + wake
     assert detector.resets == 1
-    assert gate.filter(b"ask?") == b"ask?"
 
-    gate.handle_event(SimpleNamespace(type="input_audio_buffer.speech_stopped"))
-    gate.handle_event(SimpleNamespace(type="response.created"))
-    now[0] = 20.0
-    assert gate.filter(b"barge") == b"barge"
-    gate.handle_event(SimpleNamespace(type="response.done"))
+    # Awake through the request, the response, and its playback.
+    event("input_audio_buffer.speech_started")
+    assert sends(loud, 1.0)
+    event("input_audio_buffer.speech_stopped")
+    event("response.created")
+    assert sends(quiet, 20.0)
+    event("response.done")
     playing[0] = True
-    now[0] = 40.0
-    assert gate.filter(b"over") == b"over"
+    assert sends(quiet, 40.0)
     playing[0] = False
-    now[0] = 44.0
-    assert gate.filter(b"more") == b"more"
+    assert sends(quiet, 44.0)
 
-    now[0] = 45.0
-    assert gate.filter(b"late") == b""
+    # Speech that starts as the timeout runs out keeps the audio flowing
+    # until the server confirms it, even across a short pause.
+    assert sends(loud, 45.0)
+    assert sends(quiet, 45.1)
+    assert sends(loud, 45.3)
+    event("input_audio_buffer.speech_started")
+    event("input_audio_buffer.speech_stopped")
+    assert sends(quiet, 46.0)
+
+    # Noise the server never confirms as speech holds the gate open for 2 s at most.
+    assert sends(loud, 51.0)
+    assert sends(loud, 52.9)
+    assert not sends(loud, 53.0)
     assert not gate.awake
-    assert gate.filter(b"chat") == b""
+    assert not sends(quiet, 60.0)
     assert capsys.readouterr().out == "Say 'hey_jarvis' to start.\nListening.\nSay 'hey_jarvis' to start.\n"
 
 
