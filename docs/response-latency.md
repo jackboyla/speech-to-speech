@@ -114,7 +114,9 @@ timestamp and therefore includes intervening tool work. Only explicit tool
 origins in the same session, turn and revision carry LLM totals; a shared turn
 identity alone does not join responses. Successful tool responses retain at most
 128 timing records per session for delayed follow-ups; session teardown removes
-these records. Cancellation and failure do not seed new chains. Stages overlap; do not
+these records. Tool call IDs preserve the successful parent timing when a
+prefetch fails or cannot be claimed, and across an unrelated out-of-band request.
+Cancellation and failure do not seed new chains. Stages overlap; do not
 sum them to reconstruct E2E. Configured grace and delay and Smart Turn analysis
 are no longer part of the terminal timing record.
 

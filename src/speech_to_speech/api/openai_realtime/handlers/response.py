@@ -96,9 +96,9 @@ class ResponseHandler(RealtimeBaseHandler):
         tracker = self._service.turn_latency_store.pop(
             response_key,
             session_id=st.session_id,
-            keep_for_followup=status == "completed"
-            and bool(st.pending_function_calls)
-            and not is_out_of_band(st.current_response_params),
+            tool_call_ids=[call.call_id for call in st.pending_function_calls.values() if call.call_id is not None]
+            if status == "completed" and not is_out_of_band(st.current_response_params)
+            else (),
         )
         if tracker is None or tracker.turn_id is None:
             return
@@ -788,11 +788,6 @@ class ResponseHandler(RealtimeBaseHandler):
                     return claimed
                 prefetch_request = None
         replacing_prefetch = prefetch_request is not None
-        parent_response_key = st.tool_followup_prefetch_origin_response_key
-        if parent_response_key is None:
-            parent_response_key = next(iter(st.generation_done_tool_calls), None)
-            if parent_response_key is None:
-                parent_response_key = next(reversed(st.completed_tool_response_keys), None)
         if st.in_response or (st.response_pending and not replacing_prefetch):
             return self.make_error(
                 message="Cannot create response while another response is in progress or pending.",
@@ -857,15 +852,16 @@ class ResponseHandler(RealtimeBaseHandler):
             speech_stopped_at_s=None if out_of_band else speech_stopped_at_s,
         )
         if not out_of_band:
-            history = cfg.chat.copy().buffer
-            if not history or not isinstance(history[-1], RealtimeConversationItemFunctionCallOutput):
-                parent_response_key = None
+            last_input = candidate_chat.buffer[-1] if candidate_chat.buffer else None
+            parent_call_id = (
+                last_input.call_id if isinstance(last_input, RealtimeConversationItemFunctionCallOutput) else None
+            )
             self._service.bind_response_latency_tracker(
                 conn_id,
                 request.response_key,
                 turn_id=request.turn_id,
                 turn_revision=request.turn_revision,
-                parent_response_key=parent_response_key,
+                parent_call_id=parent_call_id,
             )
         st.in_response = True
         st.clear_pending_response(request.response_key)

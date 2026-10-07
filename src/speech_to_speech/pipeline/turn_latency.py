@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from collections import defaultdict
+from collections.abc import Collection
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -180,6 +181,7 @@ class _LLMChain:
     turn_revision: int | None
     llm_total_s: float | None
     llm_rounds: int
+    call_ids: frozenset[str]
 
 
 class TurnLatencyStore:
@@ -192,8 +194,10 @@ class TurnLatencyStore:
     a per-turn pending slot and merged when the response tracker is created.
 
     Completed tool responses retain at most 128 immutable LLM snapshots per
-    session. Only an explicit parent key with matching turn/revision inherits
-    them; STT and VAD/Smart Turn timings never carry to the follow-up.
+    session. Only an explicit parent response or tool call with matching
+    turn/revision inherits them. Completed snapshots retain call IDs so response.create
+    can recover ancestry after prefetch cleanup. STT and VAD/Smart Turn timings
+    never carry to the follow-up.
 
     Session cleanup: response trackers are indexed by ``session_id`` so
     ``unregister`` can drop only that session's in-flight measurements.
@@ -209,7 +213,7 @@ class TurnLatencyStore:
         self._pending_turn: dict[tuple[str, int], TurnLatencyTracker] = {}
         self._turn_responses: dict[tuple[str, int], str] = {}
         self._session_keys: dict[str, set[str]] = defaultdict(set)
-        self._completed_tools: dict[tuple[str, str], _LLMChain] = {}
+        self._completed_tools: dict[str, dict[str, _LLMChain]] = defaultdict(dict)
 
     @staticmethod
     def _turn_key(turn_id: str, turn_revision: int | None) -> tuple[str, int]:
@@ -253,18 +257,26 @@ class TurnLatencyStore:
         turn_revision: int | None = None,
         session_id: str | None = None,
         parent_response_key: str | None = None,
+        parent_call_id: str | None = None,
     ) -> TurnLatencyTracker:
         with self._lock:
             tracker = self._trackers.get(response_key)
             if tracker is None:
                 revision = None if turn_revision is None else turn_revision
                 tracker = TurnLatencyTracker(turn_id=turn_id, turn_revision=revision)
-                if session_id is not None and parent_response_key is not None:
-                    parent = (
-                        self._trackers.get(parent_response_key)
-                        if parent_response_key in self._session_keys.get(session_id, set())
-                        else self._completed_tools.get((session_id, parent_response_key))
-                    )
+                if session_id is not None:
+                    completed = self._completed_tools.get(session_id, {})
+                    parent = None
+                    if parent_response_key is not None:
+                        parent = (
+                            self._trackers.get(parent_response_key)
+                            if parent_response_key in self._session_keys.get(session_id, set())
+                            else completed.get(parent_response_key)
+                        )
+                    elif parent_call_id is not None:
+                        parent = next(
+                            (chain for chain in reversed(completed.values()) if parent_call_id in chain.call_ids), None
+                        )
                     if (
                         parent is not None
                         and turn_id is not None
@@ -309,7 +321,7 @@ class TurnLatencyStore:
             return self._trackers.get(response_key)
 
     def pop(
-        self, response_key: str | None, *, session_id: str | None = None, keep_for_followup: bool = False
+        self, response_key: str | None, *, session_id: str | None = None, tool_call_ids: Collection[str] = ()
     ) -> TurnLatencyTracker | None:
         if response_key is None:
             return None
@@ -320,13 +332,17 @@ class TurnLatencyStore:
                 if self._turn_responses.get(key) == response_key:
                     self._turn_responses.pop(key, None)
             if session_id is not None:
-                if keep_for_followup and tracker is not None:
-                    self._completed_tools[(session_id, response_key)] = _LLMChain(
-                        tracker.turn_id, tracker.turn_revision, tracker.llm_total_s, tracker.llm_rounds
+                if tool_call_ids and tracker is not None:
+                    completed = self._completed_tools[session_id]
+                    completed[response_key] = _LLMChain(
+                        tracker.turn_id,
+                        tracker.turn_revision,
+                        tracker.llm_total_s,
+                        tracker.llm_rounds,
+                        frozenset(tool_call_ids),
                     )
-                    keys = [key for key in self._completed_tools if key[0] == session_id]
-                    for completed_key in keys[:-128]:
-                        self._completed_tools.pop(completed_key)
+                    while len(completed) > 128:
+                        completed.pop(next(iter(completed)))
                 self._detach_response_from_session(session_id, response_key)
             return tracker
 
@@ -335,8 +351,7 @@ class TurnLatencyStore:
 
     def clear_session(self, session_id: str) -> None:
         with self._lock:
-            for completed_key in [key for key in self._completed_tools if key[0] == session_id]:
-                self._completed_tools.pop(completed_key)
+            self._completed_tools.pop(session_id, None)
             for response_key in self._session_keys.pop(session_id, set()):
                 tracker = self._trackers.pop(response_key, None)
                 if tracker is not None and tracker.turn_id is not None:

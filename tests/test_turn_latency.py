@@ -236,15 +236,15 @@ def test_llm_chain_tracks_only_explicit_same_session_and_revision_parents():
     first = store.get_or_create_response("first", turn_id="turn", turn_revision=0, session_id="s")
     first.start_llm()
     first.record_llm(0.7)
-    store.pop("first", session_id="s", keep_for_followup=True)
+    store.pop("first", session_id="s", tool_call_ids={"call_first"})
     second = store.get_or_create_response(
         "second", turn_id="turn", turn_revision=0, session_id="s", parent_response_key="first"
     )
     second.start_llm()
     second.record_llm(0.9)
-    store.pop("second", session_id="s", keep_for_followup=True)
+    store.pop("second", session_id="s", tool_call_ids={"call_second"})
     third = store.get_or_create_response(
-        "third", turn_id="turn", turn_revision=0, session_id="s", parent_response_key="second"
+        "third", turn_id="turn", turn_revision=0, session_id="s", parent_call_id="call_second"
     )
     third.start_llm()
     third.record_llm(0.8)
@@ -252,13 +252,17 @@ def test_llm_chain_tracks_only_explicit_same_session_and_revision_parents():
     assert third.llm_rounds == 3
     assert third.llm_s == 0.8
     assert third.stt_s is None
-    for key, session, revision, parent in (
-        ("unrelated", "s", 0, None),
-        ("revision", "s", 1, "second"),
-        ("session", "other", 0, "second"),
+    for key, session, revision, call_id in (
+        ("unrelated", "s", 0, "unknown"),
+        ("revision", "s", 1, "call_second"),
+        ("session", "other", 0, "call_second"),
     ):
         tracker = store.get_or_create_response(
-            key, turn_id="turn", turn_revision=revision, session_id=session, parent_response_key=parent
+            key,
+            turn_id="turn",
+            turn_revision=revision,
+            session_id=session,
+            parent_call_id=call_id,
         )
         tracker.start_llm()
         tracker.record_llm(0.2)
@@ -279,9 +283,9 @@ def test_llm_chain_completed_snapshots_are_bounded_and_failed_work_is_not_retain
         tracker = store.get_or_create_response(key, turn_id="turn", turn_revision=0, session_id="s")
         tracker.start_llm()
         tracker.record_llm(0.1)
-        store.pop(key, session_id="s", keep_for_followup=True)
-    assert len(store._completed_tools) == 128
-    assert ("s", "tool_0") not in store._completed_tools
+        store.pop(key, session_id="s", tool_call_ids={"call"})
+    assert len(store._completed_tools["s"]) == 128
+    assert "tool_0" not in store._completed_tools["s"]
     # A cancelled worker cannot alter the snapshot after a response finishes.
     tracker.record_llm(9.0)
     followup = store.get_or_create_response(

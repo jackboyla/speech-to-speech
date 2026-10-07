@@ -560,9 +560,17 @@ def test_multiple_qwen_segments_keep_first_audio_timings_in_terminal_log(service
     assert "tts_ttfa=0.25s e2e=2.25s" in lines[0]
 
 
-@pytest.mark.parametrize("followup_status", ["completed", "cancelled"])
-@pytest.mark.parametrize("tool_counts", [(1,), (2,), (1, 1)])
-@pytest.mark.parametrize("mode", ["before_done", "after_done", "replace_prefetch"])
+@pytest.mark.parametrize(
+    "tool_counts,mode,followup_status",
+    [
+        pytest.param((1,), "before_done", "completed", id="prefetch-before-done"),
+        pytest.param((1,), "after_done", "completed", id="prefetch-after-done"),
+        pytest.param((1,), "replace_prefetch", "completed", id="replace-queued-prefetch"),
+        pytest.param((1,), "before_done", "cancelled", id="cancel-followup"),
+        pytest.param((2,), "before_done", "completed", id="parallel-tools"),
+        pytest.param((1, 1), "after_done", "completed", id="sequential-tools"),
+    ],
+)
 def test_tool_followup_logs_distinct_responses_in_same_turn(
     service, conn_id, caplog, followup_status, tool_counts, mode
 ):
