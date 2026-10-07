@@ -50,12 +50,24 @@ class TranscriptionEndpoint(BaseHTTPRequestHandler):
             samples = np.frombuffer(wav.readframes(wav.getnframes()), dtype="<i2")
         # Each synthetic second has a unique sample value. Consecutive duplicates
         # collapse, while tokens shared by overlapping windows remain identifiable.
-        tokens = samples[np.r_[True, samples[1:] != samples[:-1]]] if len(samples) else samples
-        text = " ".join(f"word{int(token):04d}" for token in tokens if token)
+        edges = np.flatnonzero(np.r_[True, samples[1:] != samples[:-1]]) if len(samples) else np.array([], dtype=int)
+        tokens = samples[edges]
+        words = [
+            {
+                "word": f"word{int(token) - 1000:04d}",
+                "start": int(edge) / SAMPLE_RATE,
+                "end": int(edges[index + 1] if index + 1 < len(edges) else len(samples)) / SAMPLE_RATE,
+            }
+            for index, (edge, token) in enumerate(zip(edges, tokens))
+            if token > 1000
+        ]
+        text = " ".join(word["word"] for word in words)
         rejected = self.server.max_seconds > 0 and duration > self.server.max_seconds
         self.server.requests.append({"duration_seconds": duration, "rejected": rejected, "text": text})
         time.sleep(duration * self.server.latency_per_second)
-        body = json.dumps({"error": "audio duration limit"} if rejected else {"text": text, "language": "en"}).encode()
+        body = json.dumps(
+            {"error": "audio duration limit"} if rejected else {"text": text, "language": "en", "words": words}
+        ).encode()
         self.send_response(413 if rejected else 200)
         self.send_header("content-type", "application/json")
         self.send_header("content-length", str(len(body)))
@@ -89,12 +101,14 @@ def run_case(server, seconds, window_seconds, args):
     setup = {"base_url": f"http://127.0.0.1:{server.server_port}/v1", "model": "controlled-asr", "timeout": 120}
     if "window_seconds" in inspect.signature(OpenAICompatibleSTTHandler.setup).parameters:
         setup.update(window_seconds=window_seconds, overlap_seconds=args.overlap_seconds)
+        if "boundary_mode" in inspect.signature(OpenAICompatibleSTTHandler.setup).parameters:
+            setup["boundary_mode"] = args.boundary_mode
     elif window_seconds:
         raise RuntimeError("This checkout does not yet support bounded windows; run with --windows 0 for the baseline")
     outputs = Queue()
     handler = OpenAICompatibleSTTHandler(Event(), Queue(), outputs, setup_kwargs=setup)
     server.requests.clear()  # Exclude the endpoint warmup from work metrics.
-    audio = np.repeat(np.arange(1, seconds + 1, dtype=np.int16), SAMPLE_RATE)
+    audio = np.repeat(np.arange(1001, 1001 + seconds, dtype=np.int16), SAMPLE_RATE)
     started = time.perf_counter()
     try:
         for end in [] if args.final_only else range(args.step_seconds, seconds + 1, args.step_seconds):
@@ -115,7 +129,9 @@ def run_case(server, seconds, window_seconds, args):
         requests = list(server.requests)
         reopened = None
         if args.reopen_seconds:
-            reopened_audio = np.repeat(np.arange(1, seconds + args.reopen_seconds + 1, dtype=np.int16), SAMPLE_RATE)
+            reopened_audio = np.repeat(
+                np.arange(1001, 1001 + seconds + args.reopen_seconds, dtype=np.int16), SAMPLE_RATE
+            )
             reopen_started = time.perf_counter()
             list(handler.process(VADAudio(audio=reopened_audio, mode="final", turn_id="benchmark", turn_revision=1)))
             await_idle(handler)
@@ -156,7 +172,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--durations", nargs="+", type=int, default=[30, 120, 600])
     parser.add_argument("--windows", nargs="+", type=float, default=[0, 30])
-    parser.add_argument("--overlap-seconds", type=float, default=2)
+    parser.add_argument("--overlap-seconds", type=float, default=4)
+    parser.add_argument("--boundary-mode", choices=["aligned", "text"], default="aligned")
     parser.add_argument("--step-seconds", type=int, default=5)
     parser.add_argument("--final-only", action="store_true", help="Skip progressive requests; exercise final catch-up")
     parser.add_argument(
@@ -168,10 +185,10 @@ def main():
     )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    if args.step_seconds <= 0 or any(seconds <= 0 or seconds > 32767 for seconds in args.durations):
-        parser.error("positive step and durations in 1..32767 are required")
-    if args.reopen_seconds < 0 or max(args.durations) + args.reopen_seconds > 32767:
-        parser.error("reopened duration must be in 1..32767")
+    if args.step_seconds <= 0 or any(seconds <= 0 or seconds > 31767 for seconds in args.durations):
+        parser.error("positive step and durations in 1..31767 are required")
+    if args.reopen_seconds < 0 or max(args.durations) + args.reopen_seconds > 31767:
+        parser.error("reopened duration must be in 1..31767")
     if not args.final_only and any(seconds % args.step_seconds for seconds in args.durations):
         parser.error("durations must be multiples of the progressive update step")
     logging.basicConfig(level=logging.CRITICAL)

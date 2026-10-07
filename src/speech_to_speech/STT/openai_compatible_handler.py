@@ -12,6 +12,7 @@ from collections import OrderedDict, deque
 from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass, field
+from functools import lru_cache
 from threading import Event, Lock, RLock, Thread, current_thread
 from time import perf_counter
 from typing import Any, Iterator, Literal
@@ -29,8 +30,16 @@ from speech_to_speech.pipeline.messages import (
     VADAudio,
 )
 from speech_to_speech.pipeline.speculative_turns import SpeculativeTurnTracker
+from speech_to_speech.STT.aligned_audio_windows import (
+    AlignedAudioWindow,
+    audio_digest,
+    pause_cut,
+    timed_boundary,
+    validate_words,
+)
 from speech_to_speech.STT.audio_windows import CompletedAudioWindow, reconcile_overlap
 from speech_to_speech.STT.base_stt_handler import BaseSTTHandler
+from speech_to_speech.STT.word_alignment import AlignmentCancelled, AlignmentError, QwenWordAligner, WordTiming
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +61,21 @@ class TranscriptionRequestCancelled(RuntimeError):
 class HttpTranscriptionResult:
     text: str
     language: str | None = None
+    words: tuple[WordTiming, ...] | None = None
+
+
+_aligner_factory_lock = Lock()
+
+
+@lru_cache(maxsize=2)
+def _cached_aligner(model_name: str, device: str) -> QwenWordAligner:
+    return QwenWordAligner(model_name=model_name, device=device)
+
+
+def _shared_aligner(model_name: str, device: str) -> QwenWordAligner:
+    # lru_cache alone permits duplicate constructors during concurrent misses.
+    with _aligner_factory_lock:
+        return _cached_aligner(model_name, device)
 
 
 @dataclass
@@ -214,10 +238,19 @@ class HttpTranscriptionOperation:
                     break
         if language is None and isinstance(payload.get("language"), str):
             language = payload["language"]
-        return HttpTranscriptionResult(
-            text=text,
-            language=language or self.language,
-        )
+        words = None
+        if "words" in payload:
+            if not isinstance(payload["words"], list):
+                raise TranscriptionRequestError("transcription response has invalid word timings")
+            try:
+                words = tuple(
+                    WordTiming(word["word"], float(word["start"]), float(word["end"])) for word in payload["words"]
+                )
+                if any(not isinstance(word.text, str) for word in words):
+                    raise ValueError
+            except (TypeError, KeyError, ValueError, OverflowError) as exc:
+                raise TranscriptionRequestError("transcription response has invalid word timings") from exc
+        return HttpTranscriptionResult(text=text, language=language or self.language, words=words)
 
 
 @dataclass(eq=False)
@@ -253,9 +286,12 @@ class OpenAICompatibleSTTHandler(BaseSTTHandler):
         gen_kwargs: dict[str, Any] | None = None,
         window_seconds: float = 0.0,
         overlap_seconds: float = 2.0,
+        boundary_mode: str = "aligned",
+        aligner_model: str | None = None,
+        aligner_device: str = "cpu",
     ) -> None:
-        if response_format not in {"json", "text"}:
-            raise ValueError("OpenAI-compatible STT response_format must be 'json' or 'text'")
+        if response_format not in {"json", "text", "verbose_json"}:
+            raise ValueError("OpenAI-compatible STT response_format must be json, text or verbose_json")
         if timeout <= 0:
             raise ValueError("OpenAI-compatible STT timeout must be > 0")
         if not math.isfinite(window_seconds) or window_seconds < 0:
@@ -266,6 +302,12 @@ class OpenAICompatibleSTTHandler(BaseSTTHandler):
         self._overlap_samples = int(overlap_seconds * PIPELINE_SAMPLE_RATE)
         if window_seconds and self._window_samples <= self._overlap_samples:
             raise ValueError("STT window_seconds must exceed overlap_seconds by at least one sample")
+        if boundary_mode not in {"aligned", "text"}:
+            raise ValueError("STT boundary_mode must be aligned or text")
+        if window_seconds and boundary_mode == "aligned" and self._overlap_samples < int(0.5 * PIPELINE_SAMPLE_RATE):
+            raise ValueError("Aligned STT windows need at least 0.5 seconds of overlap")
+        self.boundary_mode = boundary_mode
+        self._word_aligner = _shared_aligner(aligner_model, aligner_device) if aligner_model else None
         model = model.strip() if model else None
         language = language.strip() if language else None
         if model is None and language is None:
@@ -293,6 +335,10 @@ class OpenAICompatibleSTTHandler(BaseSTTHandler):
         self._progressive_thread: Thread | None = None
         self._final_thread: Thread | None = None
         self._completed_windows: OrderedDict[tuple[str, str | None], list[CompletedAudioWindow]] = OrderedDict()
+        self._aligned_windows: OrderedDict[tuple[str, str | None], list[AlignedAudioWindow]] = OrderedDict()
+        self._aligned_joins: OrderedDict[
+            tuple[str, str | None, AlignedAudioWindow, AlignedAudioWindow], tuple[int, str, int]
+        ] = OrderedDict()
         self.warmup()
 
     def warmup(self) -> None:
@@ -398,11 +444,19 @@ class OpenAICompatibleSTTHandler(BaseSTTHandler):
         try:
             if not self._request_is_current(request):
                 return
-            result = self._transcribe_windows(request)
-        except TranscriptionRequestCancelled:
+            result = (
+                self._transcribe_aligned_windows(request)
+                if self.boundary_mode == "aligned"
+                else self._transcribe_windows(request)
+            )
+        except (TranscriptionRequestCancelled, AlignmentCancelled):
             return
         except Exception as exc:
-            message = str(exc) if isinstance(exc, TranscriptionRequestError) else "transcription request failed"
+            message = (
+                str(exc)
+                if isinstance(exc, (TranscriptionRequestError, AlignmentError))
+                else "transcription request failed"
+            )
             self._publish_failure(request, message)
             return
 
@@ -449,6 +503,187 @@ class OpenAICompatibleSTTHandler(BaseSTTHandler):
         if not self._request_is_current(request):
             raise TranscriptionRequestCancelled("superseded")
         return result
+
+    def _timed_window(
+        self,
+        request: _TranscriptionRequest,
+        audio: np.ndarray,
+        start: int,
+        end: int,
+        next_start: int,
+        needs_times: bool,
+    ) -> AlignedAudioWindow:
+        chunk = audio[start:end]
+        if not self._request_is_current(request):
+            raise TranscriptionRequestCancelled("superseded")
+        # Do not decode trailing digital silence: ASR can hallucinate words on it.
+        silent = not np.any(
+            np.abs(chunk.astype(np.float64, copy=False)) > (0 if np.issubdtype(chunk.dtype, np.integer) else 1e-7)
+        )
+        if silent:
+            selected = request.selected_language
+            language = self.language if selected is None else (None if selected == "auto" else selected)
+            return AlignedAudioWindow(start, end, next_start, audio_digest(chunk), "", language)
+        result = self._run_audio_window(request, chunk)
+        words: tuple[WordTiming, ...] = ()
+        if needs_times and result.text.strip():
+            if result.words is not None:
+                words = result.words
+            elif self._word_aligner is not None:
+                words = tuple(
+                    self._word_aligner.align(
+                        chunk,
+                        result.text,
+                        result.language,
+                        cancel_check=lambda: not self._request_is_current(request),
+                    )
+                )
+            else:
+                raise AlignmentError(
+                    "Continuous speech needs word timestamps or openai_stt_aligner_model; text-only joins require explicit boundary_mode=text"
+                )
+            validate_words(result.text, words, len(chunk) / PIPELINE_SAMPLE_RATE)
+        if not self._request_is_current(request):
+            raise TranscriptionRequestCancelled("superseded")
+        return AlignedAudioWindow(start, end, next_start, audio_digest(chunk), result.text, result.language, words)
+
+    @staticmethod
+    def _absolute_words(window: AlignedAudioWindow) -> tuple[WordTiming, ...]:
+        offset = window.start / PIPELINE_SAMPLE_RATE
+        return tuple(WordTiming(word.text, word.start + offset, word.end + offset) for word in window.words)
+
+    def _aligned_boundary(
+        self, request: _TranscriptionRequest, audio: np.ndarray, left: AlignedAudioWindow, right: AlignedAudioWindow
+    ) -> tuple[int, str, int]:
+        key = (request.source.turn_id, request.selected_language, left, right) if request.source.turn_id else None
+        with self._request_lock:
+            cached = self._aligned_joins.get(key) if key is not None else None
+            if cached is not None and key is not None:
+                self._aligned_joins.move_to_end(key)
+                return cached
+        result = self._compute_aligned_boundary(request, audio, left, right)
+        with self._request_lock:
+            if not self._request_is_current(request):
+                raise TranscriptionRequestCancelled("superseded")
+            # Retain only joins between completed windows. A count-based LRU
+            # would re-decode old bridges once a long turn exceeds its capacity.
+            if key is not None and right.end < len(audio):
+                self._aligned_joins[key] = result
+                self._aligned_joins.move_to_end(key)
+        return result
+
+    def _compute_aligned_boundary(
+        self, request: _TranscriptionRequest, audio: np.ndarray, left: AlignedAudioWindow, right: AlignedAudioWindow
+    ) -> tuple[int, str, int]:
+        old, new = self._absolute_words(left), self._absolute_words(right)
+        try:
+            left_cut, right_cut = timed_boundary(
+                left.text, old, right.text, new, right.start / PIPELINE_SAMPLE_RATE, left.end / PIPELINE_SAMPLE_RATE
+            )
+            return left_cut, right.text[right_cut:], right_cut
+        except AlignmentError:
+            # One bounded bridge decode supplies more context around the join.
+            # Join it at two independently checked physical audio anchors.
+            start = max(left.start, right.start - 2 * self._overlap_samples)
+            end = min(right.end, left.end + 2 * self._overlap_samples, start + self._window_samples)
+            bridge = self._timed_window(request, audio, start, end, end, True)
+            bridge_words = self._absolute_words(bridge)
+            left_cut, bridge_start = timed_boundary(
+                left.text, old, bridge.text, bridge_words, start / PIPELINE_SAMPLE_RATE, left.end / PIPELINE_SAMPLE_RATE
+            )
+            bridge_end, right_cut = timed_boundary(
+                bridge.text,
+                bridge_words,
+                right.text,
+                new,
+                right.start / PIPELINE_SAMPLE_RATE,
+                end / PIPELINE_SAMPLE_RATE,
+            )
+            if bridge_end < bridge_start:
+                raise AlignmentError("Audio-timed retry crossed its boundary anchors")
+            return left_cut, bridge.text[bridge_start:bridge_end] + right.text[right_cut:], right_cut
+
+    def _transcribe_aligned_windows(self, request: _TranscriptionRequest) -> HttpTranscriptionResult:
+        audio = np.asarray(request.source.audio).squeeze()
+        if audio.ndim != 1 or not np.isfinite(audio).all():
+            raise TranscriptionRequestError("STT audio must be finite and mono")
+        if not self._window_samples or len(audio) <= self._window_samples:
+            return self._run_audio_window(request, audio)
+        key = (request.source.turn_id, request.selected_language) if request.source.turn_id is not None else None
+        with self._request_lock:
+            cached = list(self._aligned_windows.get(key, [])) if key is not None else []
+        completed: list[AlignedAudioWindow] = []
+        previous: AlignedAudioWindow | None = None
+        text, offset, start = "", 0, 0
+        language = (
+            self.language
+            if request.selected_language is None
+            else (None if request.selected_language == "auto" else request.selected_language)
+        )
+        while start < len(audio):
+            index = len(completed)
+            window = cached[index] if index < len(cached) else None
+            if window is not None and (
+                window.start != start
+                or window.end >= len(audio)
+                or window.digest != audio_digest(audio[start : window.end])
+            ):
+                cached = cached[:index]
+                with self._request_lock:
+                    self._aligned_joins = OrderedDict(
+                        (join_key, value)
+                        for join_key, value in self._aligned_joins.items()
+                        if join_key[:2] != key or join_key[3].start < start
+                    )
+                window = None
+            if window is None:
+                end = min(start + self._window_samples, len(audio))
+                stable = end < len(audio)
+                cut = pause_cut(audio, start, end, self._overlap_samples) if stable else None
+                if cut is not None:
+                    end, next_start = cut, cut
+                else:
+                    next_start = end - self._overlap_samples if stable else end
+                incoming = previous is not None and start < previous.end
+                window = self._timed_window(request, audio, start, end, next_start, incoming or next_start < end)
+            language = window.language or language
+            if previous is None:
+                text = window.text
+            elif window.start >= previous.end or not previous.text.strip() or not window.text.strip():
+                no_spaces = (language or "").lower() in {"zh", "yue", "ja", "chinese", "cantonese", "japanese"}
+                separator = " " if text and window.text and not no_spaces else ""
+                offset = len(text) + len(separator)
+                text += separator + window.text
+            else:
+                left_cut, suffix, right_cut = self._aligned_boundary(request, audio, previous, window)
+                splice = offset + left_cut
+                if splice < 0 or splice > len(text):
+                    raise AlignmentError("Audio-timed join tried to revise a completed prefix")
+                text = text[:splice] + suffix
+                # Bridge retries can prepend text before the right-window suffix.
+                bridge_length = len(suffix) - len(window.text[right_cut:])
+                offset = splice + bridge_length - right_cut
+            if window.end >= len(audio):
+                break
+            completed.append(window)
+            with self._request_lock:
+                if not self._request_is_current(request):
+                    raise TranscriptionRequestCancelled("superseded")
+                if key is not None:
+                    existing = self._aligned_windows.get(key, [])
+                    if existing[: len(completed)] != completed and existing[:index] == completed[:index]:
+                        self._aligned_windows[key] = list(completed)
+                    if key in self._aligned_windows:
+                        self._aligned_windows.move_to_end(key)
+                    while len(self._aligned_windows) > self._MAX_PENDING_FINAL_REQUESTS:
+                        evicted, _ = self._aligned_windows.popitem(last=False)
+                        self._aligned_joins = OrderedDict(
+                            (join_key, value)
+                            for join_key, value in self._aligned_joins.items()
+                            if join_key[:2] != evicted
+                        )
+            previous, start = window, window.next_start
+        return HttpTranscriptionResult(text, language)
 
     def _transcribe_windows(self, request: _TranscriptionRequest) -> HttpTranscriptionResult:
         audio = np.asarray(request.source.audio).squeeze()
@@ -571,6 +806,8 @@ class OpenAICompatibleSTTHandler(BaseSTTHandler):
         with self._request_lock:
             self._session_generation += 1
             self._completed_windows.clear()
+            self._aligned_windows.clear()
+            self._aligned_joins.clear()
             self._pending_finals.clear()
             self._pending_progressive = None
             for request in self._active.values():
@@ -582,6 +819,8 @@ class OpenAICompatibleSTTHandler(BaseSTTHandler):
             self._closed = True
             self._session_generation += 1
             self._completed_windows.clear()
+            self._aligned_windows.clear()
+            self._aligned_joins.clear()
             self._pending_finals.clear()
             self._pending_progressive = None
             for request in self._active.values():
@@ -599,6 +838,8 @@ class OpenAICompatibleSTTHandler(BaseSTTHandler):
         use_setup_language: bool = True,
     ) -> HttpTranscriptionOperation:
         extra_fields = self.gen_kwargs.copy()
+        if self.response_format == "verbose_json":
+            extra_fields.setdefault("timestamp_granularities[]", "word")
         if not use_setup_language:
             extra_fields.pop("language", None)
             extra_fields.pop("languages[]", None)

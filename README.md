@@ -262,8 +262,8 @@ For client-only TTS serving with vLLM-Omni or another compatible server, see
 For client-only speech recognition with vLLM, OpenAI's hosted Transcription API,
 or another compatible server, see
 [OpenAI-compatible STT](./docs/openai-compatible-stt.md).
-For long Qwen3-ASR/vLLM turns, add `--openai_stt_window_seconds 30 --openai_stt_overlap_seconds 2` to `--stt openai`. This bounds each upload and
-reuses completed window text; see [bounds and quality trade-offs](./docs/openai-compatible-stt.md#bounded-audio-windows).
+For long Qwen3-ASR/vLLM turns, use bounded uploads with word timings or the optional
+Qwen forced aligner. See [configuration and boundary checks](./docs/openai-compatible-stt.md#bounded-audio-windows).
 
 For native incremental audio and partial transcripts, see
 [stateful streaming STT](./docs/openai-compatible-stt.md#stateful-streaming-stt).
@@ -823,7 +823,8 @@ To check bounded HTTP request work without a model or GPU:
 
 ```bash
 uv run python scripts/benchmark_asr_windows.py --durations 30 120 600 \
-  --windows 0 30 --max-request-seconds 60 --output /tmp/asr-window-work.json
+  --windows 0 30 --overlap-seconds 4 --boundary-mode aligned \
+  --reopen-seconds 5 --max-request-seconds 60 --output /tmp/asr-window-work.json
 ```
 
 The controlled server checks full transcript assembly and request limits using

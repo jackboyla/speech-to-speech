@@ -9,7 +9,9 @@ VAD audio -> POST /v1/audio/transcriptions
 ```
 
 Each request uploads an in-memory mono PCM16 WAV at 16 kHz and accepts either
-JSON with a string `text` field or a plain-text response. With live
+JSON with a string `text` field or a plain-text response. Word timings use
+`words: [{"word": "hello", "start": 0.1, "end": 0.5}]`, in seconds relative
+to each request. `verbose_json` requests word timestamps from compatible servers. With live
 transcription enabled, progressive updates upload the accumulated utterance
 again unless bounded windows are enabled below.
 
@@ -34,43 +36,54 @@ speech-to-speech local \
   --openai_stt_base_url http://localhost:8000/v1 \
   --openai_stt_model Qwen/Qwen3-ASR-1.7B \
   --openai_stt_window_seconds 30 \
-  --openai_stt_overlap_seconds 2
+  --openai_stt_overlap_seconds 4 \
+  --openai_stt_language en \
+  --openai_stt_aligner_model Qwen/Qwen3-ForcedAligner-0.6B-hf
 ```
 
 ## Bounded audio windows
 
 Set `--openai_stt_window_seconds 30` to cap each transcription upload at 30
-seconds. `--openai_stt_overlap_seconds 2` keeps two seconds of shared audio
-between windows. The window must exceed the overlap; an overlap of zero allows
-hard cuts without text reconciliation. The default window is `0` (disabled),
-so existing short-turn behavior and provider usage stay unchanged.
+seconds. `--openai_stt_overlap_seconds 4` keeps four seconds of shared audio.
+The default window is `0` (disabled). The default boundary mode is `aligned`;
+when windows are enabled, the handler requires at least half a second of overlap.
 
 The handler retains completed window text for the current turn and transcribes
-only the outstanding tail on later updates. A reopened revision of that turn
-reuses completed windows when their audio and language selection still match.
-It re-decodes the final window even after a speculative final, so resumed speech
-can revise the tail. Internal window boundaries emit no turn-end event and do
-not trigger an assistant reply. If progressive work was skipped or disabled,
-the final request catches up through all remaining windows.
+only the outstanding tail on later updates. A reopened turn reuses completed
+windows when their audio and language still match. The last window stays
+revisable. Internal boundaries do not end the turn or trigger a reply. Final
+requests process all remaining windows even when progressive work was skipped.
 
-At each boundary the handler looks for an exact match between the older text's
-suffix and the newer text's prefix, ignoring case and punctuation. It requires
-at least two words or CJK characters and checks at most 64 tokens. If the exact
-boundary fails, it accepts an exact anchor of at least three tokens within two
-tokens of both edges. This lets the new window revise a clipped ending and skips
-a clipped start, while retaining older text before the anchor. The newer window
-supplies the matched text. Ambiguous matches in repeated speech, and boundaries
-with no match, retain both parts
-and logs a warning. This can duplicate boundary words; repeated phrases can
-also produce false matches or omissions. This text heuristic cannot guarantee word alignment
-without timestamps. Evaluate your language, speaking rate and model before
-choosing a window and overlap. Windowing stays opt-in pending wider speech
-quality measurements.
+Aligned mode cuts at a confirmed interval of digital silence when possible.
+For continuous speech, it matches adjacent words by both text and audio time,
+then keeps the newer text after that shared position. It preserves punctuation
+and repeated words. If the match is unclear, it transcribes one bounded section
+across the boundary and checks both joins. Missing, invalid or still ambiguous
+word times produce a clear failure; the handler does not guess a join. Entirely
+silent windows bypass recognition to avoid silent-tail hallucinations.
+
+Use word times from your server, or set `--openai_stt_aligner_model
+Qwen/Qwen3-ForcedAligner-0.6B-hf`. The optional local model loads when a boundary
+needs it. It requires a Transformers version with native Qwen3 forced-alignment
+support (validated with 5.19.0), a known language and extra memory. Install it in
+a project environment with `uv pip install 'transformers>=5.19,<6'`. Set
+`--openai_stt_aligner_device cuda:0` only when that GPU is available; the default
+is CPU. Supported language hints are `en`, `zh`, `yue`, `fr`, `de`, `it`, `ja`,
+`ko`, `pt`, `ru` and `es`. Japanese and Korean may need the processor's optional
+tokenizer dependencies. Alignment locates recognized words; it cannot correct
+recognition errors or guarantee that supplied timestamps describe the audio.
+
+`--openai_stt_boundary_mode text` selects the earlier text-only join. It permits
+zero overlap and can repeat or omit words, especially in repeated phrases.
+Use aligned mode for new windowed deployments. Windowing remains opt-in until
+speech quality, supported languages and alignment cost justify a wider default.
 
 This caps recognition requests, not the VAD audio buffer. The VAD still supplies
 cumulative turn audio. The handler caches text and audio hashes for up to eight
 turn/language keys per pipeline, with no second retained audio copy. Session end
-clears this cache. Final and progressive workers can independently decode a
+clears this cache. Verified joins between completed windows are cached with
+their audio, text and timings, so later updates do not repeat earlier bridge
+requests. Audio changes and turn eviction discard those joins. Final and progressive workers can independently decode a
 window during a race, while the existing cancellation and stale-result checks
 still govern dispatch and publication.
 
@@ -78,6 +91,46 @@ Known vLLM audio duration, upload size and decoded-audio limit errors produce a
 sanitized hint to enable or reduce the window. Set the cap below any stricter
 limit imposed by your provider. Setup still sends one second of silence to test
 the endpoint, independently of the turn window setting.
+
+## Window validation
+
+The HTTP stress test covers 30, 120 and 600 seconds of synthetic speech, with
+word timestamps and resumed finals. All bounded requests stay within 30 seconds
+and produce exact test transcripts. At 600 seconds, progressive uploads total
+2,798 seconds versus 36,900 without windows: 92.4% less audio. This measures
+transport work, not recognition quality or real model latency. Reproduce it:
+
+```bash
+uv run python scripts/benchmark_asr_windows.py --durations 30 120 600 \
+  --windows 0 30 --overlap-seconds 4 --boundary-mode aligned \
+  --reopen-seconds 5 --max-request-seconds 60 --output /tmp/asr-window-work.json
+```
+
+A small English LibriSpeech check uses Qwen3-ASR-0.6B-hf and the Qwen forced
+aligner with the production planner and joins. Clean 120-second speech has
+4.46% word error rate with windows, versus 4.83% for whole-recording recognition.
+A 62-second recording matches the baseline at 4.64%; shifted and noisy variants
+also complete. All 20 repetitions of one sentence survive, versus 18 in the
+whole-recording baseline. One 20-second bridge resolves a difficult boundary.
+These figures include recognition mistakes and cannot isolate boundary WER
+without reference word timestamps. They do not establish quality for other
+languages, Qwen3-ASR-1.7B or vLLM serving.
+
+CPU recognition plus alignment costs about 64 seconds on the clean 120-second
+case, versus 47 seconds for the whole recording. Whole-recording recognition
+therefore remains cheaper for this final-only CPU example; bounded windows
+address repeated progressive work and provider limits. Check quality and cost
+on your own audio before deployment.
+
+A native Transformers GPU check on one L40S completes six cases, including a
+600-second recording made from repeated labeled English clips. That long case
+has 3.54% word error rate (41 substitutions, 10 deletions, zero insertions).
+Nine progressive calls at 60-second intervals plus the final submit 840 seconds
+of audio; no backend call exceeds 30 seconds. The final call takes 6.96 seconds
+after earlier work has completed. Prefixes feed immediately rather than waiting
+for live playback. This checks real model work with the production planner; it
+does not measure HTTP or vLLM latency, unique ten-minute speech or boundary-only
+error rates.
 
 ## OpenAI-hosted transcription
 

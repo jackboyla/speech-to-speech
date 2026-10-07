@@ -212,7 +212,7 @@ def _handler(
         Event(),
         queue_in=Queue(),
         queue_out=Queue(),
-        setup_kwargs={"speculative_turns": tracker, **setup_overrides},
+        setup_kwargs={"speculative_turns": tracker, "boundary_mode": "text", **setup_overrides},
     )
     _FakeOperation.results = []
     return handler
@@ -986,3 +986,339 @@ def test_bounded_runtime_auto_does_not_restore_setup_language(monkeypatch):
 
     assert result[0].language_code is None
     assert all(operation.kwargs["language"] is None for operation in _FakeOperation.instances[1:])
+
+
+def _timed_repetition_audio(seconds, *, mode="final", revision=0):
+    source = _audio(mode, revision=revision)
+    # Encode a source second in each PCM value so the fake backend knows which
+    # physical audio it received. Every second contains one spoken "very".
+    source.audio = np.repeat(np.arange(1000, 1000 + seconds, dtype=np.int16), 16000)
+    return source
+
+
+def _install_timed_repetition_backend(monkeypatch):
+    from speech_to_speech.STT.word_alignment import WordTiming
+
+    class TimedOperation(_FakeOperation):
+        def run(self, cancel_check=lambda: False):
+            with wave.open(io.BytesIO(self.kwargs["wav_bytes"]), "rb") as wav:
+                pcm = np.frombuffer(wav.readframes(wav.getnframes()), dtype=np.int16)
+            start = int(pcm[0]) - 1000
+            seconds = len(pcm) // 16000
+            self.start = start
+            self.seconds = seconds
+            return HttpTranscriptionResult(
+                text="very " * seconds,
+                language="en",
+                words=tuple(WordTiming("very", i + 0.1, i + 0.4) for i in range(seconds)),
+            )
+
+    TimedOperation.instances = []
+    monkeypatch.setattr(stt_module, "HttpTranscriptionOperation", TimedOperation)
+    return TimedOperation
+
+
+@pytest.mark.parametrize("seconds", [30, 120, 600])
+def test_aligned_windows_preserve_every_repetition_in_long_speech(monkeypatch, seconds):
+    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=30, overlap_seconds=4)
+    backend = _install_timed_repetition_backend(monkeypatch)
+    outputs = _run_final(handler, _timed_repetition_audio(seconds))
+    assert len(outputs) == 1 and isinstance(outputs[0], Transcription)
+    assert outputs[0].text.split() == ["very"] * seconds
+    assert all(operation.seconds <= 30 for operation in backend.instances)
+    assert len(backend.instances) == max(1, (seconds - 4 + 25) // 26)
+
+
+@pytest.mark.parametrize("change", ["reopen", "audio", "session", "language"])
+def test_aligned_window_cache_reuses_only_unchanged_context(monkeypatch, change):
+    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=30, overlap_seconds=4)
+    backend = _install_timed_repetition_backend(monkeypatch)
+    config = RuntimeConfig(
+        session=RealtimeSessionCreateRequest(type="realtime", audio={"input": {"transcription": {"language": "en"}}})
+    )
+    first = _timed_repetition_audio(40, mode="progressive")
+    first.runtime_config = config
+    assert _run_progressive(handler, first)[0].text.split() == ["very"] * 40
+    backend.instances.clear()
+    source = _timed_repetition_audio(66, revision=1)
+    source.runtime_config = config
+    if change == "audio":
+        source.audio[0] += 1  # A changed sample invalidates the digest, without changing the word.
+    elif change == "session":
+        handler.on_session_end()
+    elif change == "language":
+        config.session.audio.input.transcription.language = "de"
+    output = _run_final(handler, source)[0]
+    assert isinstance(output, Transcription) and output.text.split() == ["very"] * 66
+    assert len(backend.instances) == (2 if change == "reopen" else 3)
+    if change == "language":
+        assert all(operation.kwargs["language"] == "de" for operation in backend.instances)
+
+
+def test_cancel_during_word_alignment_discards_result_and_stops_http(monkeypatch):
+    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=3, overlap_seconds=1)
+    entered, release = Event(), Event()
+
+    class BlockedAligner:
+        def align(self, audio, text, language, *, cancel_check):
+            from speech_to_speech.STT.word_alignment import WordTiming
+
+            entered.set()
+            assert release.wait(timeout=2)
+            return [WordTiming("very", 0.1, 0.4)]
+
+    handler._word_aligner = BlockedAligner()
+    _FakeOperation.results = [HttpTranscriptionResult("very", "en")]
+    _FakeOperation.instances.clear()
+    source = _audio("progressive", samples=16000 * 6)
+    source.audio[:] = 0.1
+    assert list(handler.process(source)) == []
+    try:
+        assert entered.wait(timeout=1)
+        handler.on_session_end()
+    finally:
+        release.set()
+        handler._progressive_thread.join(timeout=1)
+    assert not handler._progressive_thread.is_alive()
+    assert len(_FakeOperation.instances) == 1
+    assert not handler._aligned_windows
+    assert handler.queue_out.empty()
+
+
+@pytest.mark.parametrize("corruption", ["incomplete", "shift_forward", "shift_backward", "nonfinite"])
+def test_invalid_backend_word_metadata_never_falls_back_to_text_join(monkeypatch, corruption):
+    from speech_to_speech.STT.word_alignment import WordTiming
+
+    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=3, overlap_seconds=1)
+    _FakeOperation.instances.clear()
+    words = tuple(WordTiming(word, i + 0.1, i + 0.4) for i, word in enumerate(("one", "two", "three")))
+    if corruption == "incomplete":
+        words = words[:1]
+    elif corruption == "nonfinite":
+        words = (WordTiming("one", float("nan"), 0.4),) + words[1:]
+    else:
+        shift = 1 if corruption == "shift_forward" else -1
+        words = tuple(WordTiming(word.text, word.start + shift, word.end + shift) for word in words)
+    _FakeOperation.results = [HttpTranscriptionResult("one two three", "en", words)]
+    source = _audio(samples=16000 * 6)
+    source.audio[:] = 0.1
+    outputs = _run_final(handler, source)
+    assert len(outputs) == 1 and isinstance(outputs[0], TranscriptionFailure)
+    assert len(_FakeOperation.instances) == 1
+    assert not handler._aligned_windows
+
+
+def test_failed_alignment_join_retries_only_one_bounded_bridge(monkeypatch):
+    from speech_to_speech.STT.word_alignment import WordTiming
+
+    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=3, overlap_seconds=1)
+    _FakeOperation.instances.clear()
+    _FakeOperation.results = [
+        HttpTranscriptionResult("one two", "en", (WordTiming("one", 0.1, 0.4), WordTiming("two", 1.1, 1.4))),
+        HttpTranscriptionResult("three four", "en", (WordTiming("three", 0.1, 0.4), WordTiming("four", 1.1, 1.4))),
+        HttpTranscriptionResult("five six", "en", (WordTiming("five", 0.1, 0.4), WordTiming("six", 1.1, 1.4))),
+    ]
+    source = _audio(samples=16000 * 5)
+    source.audio[:] = 0.1
+    outputs = _run_final(handler, source)
+    assert len(outputs) == 1 and isinstance(outputs[0], TranscriptionFailure)
+    assert len(_FakeOperation.instances) == 3
+    for operation in _FakeOperation.instances:
+        with wave.open(io.BytesIO(operation.kwargs["wav_bytes"]), "rb") as wav:
+            assert wav.getnframes() <= 3 * 16000
+
+
+@pytest.mark.parametrize("change_audio", [False, True])
+def test_bridge_repair_keeps_source_offsets_correct_for_the_next_window(monkeypatch, change_audio):
+    from speech_to_speech.STT.word_alignment import WordTiming
+
+    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=30, overlap_seconds=4)
+    backend = _install_timed_repetition_backend(monkeypatch)
+    original_run = backend.run
+
+    def inconsistent_boundary(operation, cancel_check=lambda: False):
+        result = original_run(operation, cancel_check)
+        words = list(result.words)
+        # The two decodes disagree only near the cut. The bridge's wider
+        # context recognizes those words; later joins must still find offsets.
+        if operation.start == 0:
+            words[26:] = [WordTiming("left", w.start, w.end) for w in words[26:]]
+        elif operation.start == 26:
+            words[:4] = [WordTiming("right", w.start, w.end) for w in words[:4]]
+        return HttpTranscriptionResult(" ".join(w.text for w in words) + " ", "en", tuple(words))
+
+    monkeypatch.setattr(backend, "run", inconsistent_boundary)
+    outputs = _run_final(handler, _timed_repetition_audio(66))
+    assert len(outputs) == 1 and isinstance(outputs[0], Transcription)
+    assert outputs[0].text.split() == ["very"] * 66
+    assert [operation.start for operation in backend.instances] == [0, 26, 18, 52]
+    assert all(operation.seconds <= 30 for operation in backend.instances)
+
+    backend.instances.clear()
+    reopened = _timed_repetition_audio(92, revision=1)
+    if change_audio:
+        reopened.audio[100] += 1
+    outputs = _run_final(handler, reopened)
+    assert len(outputs) == 1 and isinstance(outputs[0], Transcription)
+    assert outputs[0].text.split() == ["very"] * 92
+    # Verified joins of immutable completed windows should not re-run a bridge.
+    expected_starts = [0, 26, 18, 52, 78] if change_audio else [52, 78]
+    assert [operation.start for operation in backend.instances] == expected_starts
+
+
+@pytest.mark.parametrize(
+    "language,first,last,expected",
+    [
+        ("en", "first section", "last section", "first section last section"),
+        ("zh", "你好。", "再见。", "你好。再见。"),
+        ("ja", "こんにちは。", "さようなら。", "こんにちは。さようなら。"),
+        ("yue", "你好。", "再見。", "你好。再見。"),
+    ],
+)
+def test_aligned_windows_cut_at_pause_without_loading_word_aligner(monkeypatch, language, first, last, expected):
+    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=3, overlap_seconds=1)
+    _FakeOperation.instances.clear()
+    _FakeOperation.results = [
+        HttpTranscriptionResult(first, language),
+        HttpTranscriptionResult(last, language),
+    ]
+    source = _audio(samples=16000 * 4)
+    source.audio[:] = 0.1
+    source.audio[40000:44000] = 0
+    outputs = _run_final(handler, source)
+    assert len(outputs) == 1 and isinstance(outputs[0], Transcription)
+    assert outputs[0].text == expected
+    sizes = []
+    for operation in _FakeOperation.instances:
+        with wave.open(io.BytesIO(operation.kwargs["wav_bytes"]), "rb") as wav:
+            sizes.append(wav.getnframes())
+    assert len(sizes) == 2 and sum(sizes) == len(source.audio)
+    assert 40000 <= sizes[0] <= 44000
+
+
+def test_concurrent_pipeline_setup_shares_one_aligner_instance(monkeypatch):
+    from time import sleep
+
+    constructed = []
+    start = Barrier(2)
+
+    class FakeAligner:
+        def __init__(self, *, model_name, device):
+            constructed.append((model_name, device))
+            sleep(0.05)  # Make simultaneous first-use requests overlap.
+
+    monkeypatch.setattr(stt_module, "QwenWordAligner", FakeAligner)
+    stt_module._cached_aligner.cache_clear()
+
+    def create():
+        start.wait(timeout=1)
+        return stt_module._shared_aligner("test-concurrent-aligner", "cpu")
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(create) for _ in range(2)]
+            first, second = [future.result(timeout=2) for future in futures]
+        assert first is second
+        assert constructed == [("test-concurrent-aligner", "cpu")]
+    finally:
+        stt_module._cached_aligner.cache_clear()
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.int16])
+def test_silent_aligned_tail_never_calls_backend_or_adds_hallucinated_text(monkeypatch, dtype):
+    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=3, overlap_seconds=1)
+    _FakeOperation.instances.clear()
+    _FakeOperation.results = [
+        HttpTranscriptionResult("actual speech", "en"),
+        HttpTranscriptionResult("hallucinated words", "en"),
+    ]
+    source = _audio(samples=16000 * 4)
+    source.audio = np.zeros(16000 * 4, dtype=dtype)
+    source.audio[:40000] = 0.1 if dtype == np.float32 else 1000
+    outputs = _run_final(handler, source)
+    assert len(outputs) == 1 and isinstance(outputs[0], Transcription)
+    assert outputs[0].text == "actual speech"
+    assert len(_FakeOperation.instances) == 1
+    assert _FakeOperation.results == [HttpTranscriptionResult("hallucinated words", "en")]
+
+
+def test_verbose_json_requests_word_timestamps_in_actual_multipart(monkeypatch):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _TranscriptionServer)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        handler = _handler(
+            monkeypatch,
+            base_url=f"http://127.0.0.1:{server.server_port}/v1",
+            response_format="verbose_json",
+        )
+        request = _FakeOperation.instances[0].kwargs
+        assert request["extra_fields"]["timestamp_granularities[]"] == "word"
+        HttpTranscriptionOperation(**request).run()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=1)
+    assert b'form-data; name="timestamp_granularities[]"' in _TranscriptionServer.received_body
+    assert b"word" in _TranscriptionServer.received_body
+    assert b"verbose_json" in _TranscriptionServer.received_body
+    assert handler.queue_out.empty()
+
+
+@pytest.mark.parametrize("response_format", ["json", "verbose_json"])
+def test_http_transcription_parses_backend_word_timings(response_format):
+    from speech_to_speech.STT.word_alignment import WordTiming
+
+    operation = HttpTranscriptionOperation(
+        endpoint_url="http://127.0.0.1:1/v1/audio/transcriptions",
+        api_key=None,
+        model="test-model",
+        wav_bytes=b"RIFF-test-wave",
+        language="en",
+        response_format=response_format,
+        timeout_s=2,
+    )
+    payload = {
+        "text": "Hello, world!",
+        "words": [{"word": "Hello", "start": 0.1, "end": 0.4}, {"word": "world", "start": 0.5, "end": 0.8}],
+    }
+    result = operation._parse_response(json.dumps(payload).encode(), "application/json")
+    assert result == HttpTranscriptionResult(
+        "Hello, world!", "en", (WordTiming("Hello", 0.1, 0.4), WordTiming("world", 0.5, 0.8))
+    )
+
+
+@pytest.mark.parametrize("words", [{}, ["word"], [{"word": "one", "start": 0}], [{"word": 1, "start": 0, "end": 1}]])
+def test_http_transcription_rejects_malformed_word_metadata(words):
+    operation = HttpTranscriptionOperation(
+        endpoint_url="http://127.0.0.1:1/v1/audio/transcriptions",
+        api_key=None,
+        model="test-model",
+        wav_bytes=b"RIFF-test-wave",
+        language="en",
+        response_format="verbose_json",
+        timeout_s=2,
+    )
+    with pytest.raises(TranscriptionRequestError, match="invalid word timings"):
+        operation._parse_response(json.dumps({"text": "one", "words": words}).encode(), "application/json")
+
+
+def test_full_negative_pcm_amplitude_is_speech_not_silence(monkeypatch):
+    from speech_to_speech.STT.word_alignment import WordTiming
+
+    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=3, overlap_seconds=1)
+    _FakeOperation.instances.clear()
+    _FakeOperation.results = [
+        HttpTranscriptionResult("one two", "en", (WordTiming("one", 2.1, 2.3), WordTiming("two", 2.4, 2.7))),
+        HttpTranscriptionResult(
+            "one two three",
+            "en",
+            (WordTiming("one", 0.1, 0.3), WordTiming("two", 0.4, 0.7), WordTiming("three", 1.1, 1.4)),
+        ),
+    ]
+    source = _audio(samples=16000 * 4)
+    source.audio = np.full(16000 * 4, -32768, dtype=np.int16)
+    outputs = _run_final(handler, source)
+    assert len(outputs) == 1 and isinstance(outputs[0], Transcription)
+    assert outputs[0].text == "one two three"
+    assert len(_FakeOperation.instances) == 2

@@ -30,7 +30,7 @@ class OpenAICompatibleSTTHandlerArguments:
     )
     openai_stt_response_format: str = field(
         default="json",
-        metadata={"help": "Transcription response format. The adapter supports json and text."},
+        metadata={"help": "Transcription response format. The adapter supports json, text and verbose_json."},
     )
     openai_stt_timeout: float = field(
         default=60.0,
@@ -43,4 +43,22 @@ class OpenAICompatibleSTTHandlerArguments:
     openai_stt_overlap_seconds: float = field(
         default=2.0,
         metadata={"help": "Audio overlap between STT windows; must be less than the window. Default: 2 seconds."},
+    )
+    openai_stt_boundary_mode: str = field(
+        default="aligned",
+        metadata={
+            "help": "Bounded joins: aligned uses pauses/word times; text selects legacy heuristic joins. Default: aligned."
+        },
+    )
+    openai_stt_aligner_model: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Optional local word-timing model, e.g. Qwen/Qwen3-ForcedAligner-0.6B-hf, when the HTTP backend supplies no word times."
+        },
+    )
+    openai_stt_aligner_device: str = field(
+        default="cpu",
+        metadata={
+            "help": "Device for the optional word aligner. Default: cpu; loaded only for continuous-speech boundaries."
+        },
     )
