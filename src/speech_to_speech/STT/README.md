@@ -99,8 +99,9 @@ This document summarizes the Speech-to-Text (STT) implementations in the `STT/` 
 ### 8) Moonshine (`--stt moonshine`)
 
 - Handler: `MoonshineSTTHandler`
-- Model flag: `--moonshine_model_name` (default `moonshine-ai/moonshine-streaming-medium`)
+- Model flag: `--moonshine_model_name` (default `moonshine-ai/moonshine-streaming-small`)
   - Streaming checkpoints: `moonshine-ai/moonshine-streaming-{tiny,small,medium}` (34M, 123M, 245M parameters)
+  - Against the default Parakeet TDT on two CPU cores (LibriSpeech test-clean / test-other WER, median latency): Parakeet 1.93% / 3.16% at 723 ms; streaming-small 2.40% / 6.76% at 680 ms; streaming-tiny 4.70% / 11.81% at 280 ms; streaming-medium 2.20% / 4.62% at 1099 ms. Moonshine is less accurate than Parakeet but much smaller, and the tiny checkpoints are the fastest local option on CPU
   - Older checkpoints: `moonshine-ai/moonshine-tiny`, `moonshine-ai/moonshine-base`
   - Language checkpoints: `moonshine-ai/moonshine-tiny-ja`, `moonshine-ai/moonshine-base-ko`, `moonshine-ai/moonshine-streaming-tiny-es`, and others
 - Language flag: `--moonshine_language` (optional ISO code)
@@ -260,6 +261,7 @@ speech-to-speech serve --stt qwen3-asr \
 ```bash
 speech-to-speech serve --stt moonshine
 speech-to-speech serve --stt moonshine --moonshine_model_name moonshine-ai/moonshine-streaming-tiny
+speech-to-speech serve --stt moonshine --moonshine_model_name moonshine-ai/moonshine-streaming-medium
 speech-to-speech serve --stt moonshine --moonshine_model_name moonshine-ai/moonshine-tiny-ja
 ```
 

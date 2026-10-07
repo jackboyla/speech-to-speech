@@ -238,7 +238,7 @@ This installs the package in editable mode. With the environment activated, use 
 | STT | [MLX Audio Whisper](https://github.com/huggingface/mlx-audio) | Apple Silicon | built-in on macOS |
 | STT | [Paraformer](https://github.com/modelscope/FunASR) | CUDA / CPU | `paraformer` |
 | STT | [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-0.6B-hf) through Transformers | CUDA / CPU, Apple Silicon | built-in |
-| STT | [Moonshine](https://huggingface.co/moonshine-ai/moonshine-streaming-medium) through Transformers | CUDA / CPU, Apple Silicon | built-in |
+| STT | [Moonshine](https://huggingface.co/moonshine-ai/moonshine-streaming-small) through Transformers | CUDA / CPU, Apple Silicon | built-in |
 | STT | OpenAI-compatible `/v1/audio/transcriptions` endpoint | local or remote HTTP server | built-in |
 | STT | OpenAI Realtime transcription | hosted or compatible WebSocket server | built-in |
 | STT | vLLM Realtime transcription (experimental) | local or remote vLLM server | built-in |
