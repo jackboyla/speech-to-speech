@@ -5,13 +5,13 @@ from typing import Optional
 @dataclass
 class MoonshineSTTHandlerArguments:
     moonshine_model_name: str = field(
-        default="moonshine-ai/moonshine-streaming-medium",
+        default="moonshine-ai/moonshine-streaming-small",
         metadata={
             "help": (
                 "The Moonshine checkpoint to load through Transformers. Streaming checkpoints come in "
-                "'tiny', 'small' and 'medium'; the older 'moonshine-ai/moonshine-tiny' and "
+                "'tiny' (fastest), 'small' and 'medium' (most accurate, slowest); the older 'moonshine-ai/moonshine-tiny' and "
                 "'moonshine-ai/moonshine-base' also work, as do language checkpoints such as "
-                "'moonshine-ai/moonshine-tiny-ja'. Default is 'moonshine-ai/moonshine-streaming-medium'."
+                "'moonshine-ai/moonshine-tiny-ja'. Default is 'moonshine-ai/moonshine-streaming-small'."
             )
         },
     )

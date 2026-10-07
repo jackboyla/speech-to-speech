@@ -180,7 +180,7 @@ def benchmark_handler(
         elif handler_name == "moonshine":
             from speech_to_speech.STT.moonshine_handler import MoonshineSTTHandler
             setup_kwargs = handler_kwargs or {
-                "model_name": "moonshine-ai/moonshine-streaming-medium",
+                "model_name": "moonshine-ai/moonshine-streaming-small",
             }
             handler = MoonshineSTTHandler(
                 stop_event,

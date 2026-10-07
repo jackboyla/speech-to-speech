@@ -19,7 +19,7 @@ from speech_to_speech.utils.utils import TORCH_DEVICES, resolve_device
 logger = logging.getLogger(__name__)
 console = Console()
 
-DEFAULT_MODEL = "moonshine-ai/moonshine-streaming-medium"
+DEFAULT_MODEL = "moonshine-ai/moonshine-streaming-small"
 DEFAULT_LANGUAGE = "en"
 SAMPLE_RATE = 16000
 
