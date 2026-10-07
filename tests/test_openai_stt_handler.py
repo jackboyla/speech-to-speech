@@ -227,8 +227,8 @@ def _audio(mode: str = "final", *, revision: int = 0, samples: int = 160) -> VAD
     )
 
 
-def _run_final(handler: OpenAICompatibleSTTHandler) -> list:
-    assert list(handler.process(_audio())) == []
+def _run_final(handler: OpenAICompatibleSTTHandler, source: VADAudio | None = None) -> list:
+    assert list(handler.process(source if source is not None else _audio())) == []
     thread = handler._final_thread
     assert thread is not None
     thread.join(timeout=1)
@@ -239,8 +239,8 @@ def _run_final(handler: OpenAICompatibleSTTHandler) -> list:
     return outputs
 
 
-def _run_progressive(handler: OpenAICompatibleSTTHandler) -> list[PartialTranscription]:
-    assert list(handler.process(_audio("progressive"))) == []
+def _run_progressive(handler: OpenAICompatibleSTTHandler, source: VADAudio | None = None) -> list[PartialTranscription]:
+    assert list(handler.process(source if source is not None else _audio("progressive"))) == []
     thread = handler._progressive_thread
     assert thread is not None
     thread.join(timeout=1)
@@ -735,3 +735,254 @@ def test_openai_api_key_is_not_sent_to_other_endpoints(monkeypatch):
     assert local_handler.api_key is None
     assert official_handler.api_key == "official-secret"
     assert explicit_handler.api_key == "endpoint-secret"
+
+
+@pytest.mark.parametrize(
+    ("prefix", "tail", "expected", "matched"),
+    [
+        ("Start HELLO, WORLD!", "hello world again", "Start hello world again", True),
+        ("你好世界", "世界和平", "你好世界和平", True),
+        ("the old boundary", "a revised boundary", "the old boundary a revised boundary", False),
+        ("yes", "yes again", "yes yes again", False),
+        ("go go go go", "go go go go", "go go go go go go go go", False),
+        ("say it say it say it", "say it say it again", "say it say it say it say it say it again", False),
+        (
+            "in the season of the year, when.",
+            "Of season of the year, with other words",
+            "in the season of the year, with other words",
+            True,
+        ),
+        (
+            "Mason’s exquisite idles are as",
+            "Its exquisite idles are as good as ever",
+            "Mason’s exquisite idles are as good as ever",
+            True,
+        ),
+        (
+            "keep these three words",
+            "one two extra these three words continued",
+            "keep these three words one two extra these three words continued",
+            False,
+        ),
+        ("", "new words", "new words", True),
+        ("keep these words", "", "keep these words", True),
+    ],
+)
+def test_window_reconciliation_retains_unmatched_speech(prefix, tail, expected, matched):
+    from speech_to_speech.STT.audio_windows import reconcile_overlap
+
+    assert reconcile_overlap(prefix, tail) == (expected, matched)
+
+
+def test_bounded_requests_reuse_prefix_across_final_and_reopened_revision(monkeypatch):
+    handler = _handler(monkeypatch, window_seconds=1, overlap_seconds=0.25)
+    _FakeOperation.instances.clear()
+    _FakeOperation.results = [
+        HttpTranscriptionResult(text="first hello world"),
+        HttpTranscriptionResult(text="hello world partial"),
+    ]
+    partial = _run_progressive(handler, _audio("progressive", samples=24000))
+    assert partial[0].text == "first hello world partial"
+    assert len(_FakeOperation.instances) == 2
+
+    _FakeOperation.results = [HttpTranscriptionResult(text="hello world final")]
+    final = _run_final(handler, _audio(samples=24000))
+    assert final[0].text == "first hello world final"
+    assert len(_FakeOperation.instances) == 3
+
+    _FakeOperation.results = [
+        HttpTranscriptionResult(text="hello world final extra words"),
+        HttpTranscriptionResult(text="extra words continued"),
+    ]
+    reopened = _run_final(handler, _audio(revision=1, samples=40000))
+    assert reopened[0].text == "first hello world final extra words continued"
+    assert len(_FakeOperation.instances) == 5
+    for operation in _FakeOperation.instances:
+        with wave.open(io.BytesIO(operation.kwargs["wav_bytes"]), "rb") as wav:
+            assert wav.getnframes() <= PIPELINE_SAMPLE_RATE
+    assert not _FakeOperation.results
+
+
+@pytest.mark.parametrize("change", ["audio", "session", "language"])
+def test_completed_windows_are_invalidated_when_input_context_changes(monkeypatch, change):
+    handler = _handler(monkeypatch, window_seconds=1, overlap_seconds=0.25)
+    config = RuntimeConfig(
+        session=RealtimeSessionCreateRequest(type="realtime", audio={"input": {"transcription": {"language": "es"}}})
+    )
+    first = _audio("progressive", samples=24000)
+    first.runtime_config = config
+    _FakeOperation.results = [HttpTranscriptionResult(text="old first"), HttpTranscriptionResult(text="old last")]
+    _run_progressive(handler, first)
+    source = _audio("progressive", samples=24000)
+    source.runtime_config = config
+    if change == "audio":
+        source.audio[0] = 0.5
+    elif change == "session":
+        handler.on_session_end()
+    else:
+        config.session.audio.input.transcription.language = "de"
+    _FakeOperation.instances.clear()
+    _FakeOperation.results = [HttpTranscriptionResult(text="new first"), HttpTranscriptionResult(text="new last")]
+
+    outputs = _run_progressive(handler, source)
+
+    assert outputs[0].text == "new first new last"
+    assert len(_FakeOperation.instances) == 2
+    if change == "language":
+        assert all(operation.kwargs["language"] == "de" for operation in _FakeOperation.instances)
+
+
+def test_cancelled_window_does_not_launch_more_requests_or_cache_result(monkeypatch):
+    handler = _handler(monkeypatch, window_seconds=1, overlap_seconds=0.25)
+    started = Event()
+    release = Event()
+
+    class _BlockedWindowOperation(_FakeOperation):
+        def run(self, cancel_check=lambda: False):
+            started.set()
+            assert release.wait(timeout=2)
+            return HttpTranscriptionResult(text="cancelled text")
+
+    monkeypatch.setattr(stt_module, "HttpTranscriptionOperation", _BlockedWindowOperation)
+    _BlockedWindowOperation.instances = []
+    assert list(handler.process(_audio("progressive", samples=40000))) == []
+    try:
+        assert started.wait(timeout=1)
+        handler.on_session_end()
+    finally:
+        release.set()
+        assert handler._progressive_thread is not None
+        handler._progressive_thread.join(timeout=1)
+    assert not handler._progressive_thread.is_alive()
+    assert len(_BlockedWindowOperation.instances) == 1
+    assert handler.queue_out.empty()
+
+    monkeypatch.setattr(stt_module, "HttpTranscriptionOperation", _FakeOperation)
+    _FakeOperation.instances.clear()
+    _FakeOperation.results = [HttpTranscriptionResult(text="fresh first"), HttpTranscriptionResult(text="fresh last")]
+    outputs = _run_progressive(handler, _audio("progressive", samples=24000))
+    assert outputs[0].text == "fresh first fresh last"
+    assert len(_FakeOperation.instances) == 2
+
+
+def test_zero_audio_overlap_keeps_repeated_words(monkeypatch):
+    handler = _handler(monkeypatch, window_seconds=1, overlap_seconds=0)
+    _FakeOperation.results = [HttpTranscriptionResult(text="yes yes"), HttpTranscriptionResult(text="yes yes")]
+
+    outputs = _run_final(handler, _audio(samples=24000))
+
+    assert outputs[0].text == "yes yes yes yes"
+
+
+@pytest.mark.parametrize(
+    ("window_seconds", "overlap_seconds"),
+    [(float("nan"), 0), (float("inf"), 0), (-1, 0), (1, -1), (1, float("nan")), (1, 1), (0.00001, 0)],
+)
+def test_invalid_audio_window_settings_fail_before_warmup(monkeypatch, window_seconds, overlap_seconds):
+    with pytest.raises(ValueError):
+        _handler(monkeypatch, window_seconds=window_seconds, overlap_seconds=overlap_seconds)
+    assert not _FakeOperation.instances
+
+
+def test_audio_window_cli_arguments():
+    from transformers import HfArgumentParser
+
+    from speech_to_speech.arguments_classes.openai_stt_arguments import OpenAICompatibleSTTHandlerArguments
+
+    parser = HfArgumentParser(OpenAICompatibleSTTHandlerArguments)
+    defaults = parser.parse_args_into_dataclasses([])[0]
+    assert defaults.openai_stt_window_seconds == 0
+    assert defaults.openai_stt_overlap_seconds == 2
+    configured = parser.parse_args_into_dataclasses(
+        ["--openai_stt_window_seconds", "30", "--openai_stt_overlap_seconds", "3"]
+    )[0]
+    assert configured.openai_stt_window_seconds == 30
+    assert configured.openai_stt_overlap_seconds == 3
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "hint"),
+    [
+        (400, "Maximum allowed duration exceeded. secret-credential", "audio duration limit exceeded"),
+        (400, "VLLM_MAX_AUDIO_DECODE_BYTES exceeded. secret-credential", "decoded audio limit exceeded"),
+        (413, "secret-credential", "upload size limit exceeded"),
+        (400, "secret-credential", None),
+    ],
+)
+def test_http_audio_limit_errors_give_safe_window_hint(monkeypatch, status, body, hint):
+    import httpx
+
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(status, text=body))
+    monkeypatch.setattr(stt_module.httpx, "AsyncClient", lambda **kwargs: real_client(transport=transport, **kwargs))
+    operation = HttpTranscriptionOperation(
+        endpoint_url="http://transcription.example/v1/audio/transcriptions",
+        api_key=None,
+        model="Qwen/Qwen3-ASR-0.6B",
+        wav_bytes=b"RIFF-test-wave",
+        language=None,
+        response_format="json",
+        timeout_s=2,
+    )
+
+    with pytest.raises(TranscriptionRequestError) as error:
+        operation.run()
+
+    message = str(error.value)
+    assert f"HTTP {status}" in message
+    assert "secret-credential" not in message
+    if hint is not None:
+        assert hint in message
+        assert "openai_stt_window_seconds" in message
+    else:
+        assert message == f"transcription server returned HTTP {status}"
+
+
+def test_language_hint_is_fixed_for_batch_and_new_revision_uses_update(monkeypatch):
+    handler = _handler(monkeypatch, window_seconds=1, overlap_seconds=0.25)
+    config = RuntimeConfig(
+        session=RealtimeSessionCreateRequest(type="realtime", audio={"input": {"transcription": {"language": "es"}}})
+    )
+
+    class _UpdatingLanguageOperation(_FakeOperation):
+        def run(self, cancel_check=lambda: False):
+            result = super().run(cancel_check)
+            config.session.audio.input.transcription.language = "de"
+            return result
+
+    monkeypatch.setattr(stt_module, "HttpTranscriptionOperation", _UpdatingLanguageOperation)
+    _FakeOperation.instances.clear()
+    _FakeOperation.results = [HttpTranscriptionResult(text="hola mundo"), HttpTranscriptionResult(text="mundo nuevo")]
+    source = _audio("progressive", samples=24000)
+    source.runtime_config = config
+
+    outputs = _run_progressive(handler, source)
+
+    assert outputs[0].text == "hola mundo mundo nuevo"
+    assert len(_FakeOperation.instances) == 2
+    assert all(operation.kwargs["language"] == "es" for operation in _FakeOperation.instances)
+
+    _FakeOperation.instances.clear()
+    _FakeOperation.results = [HttpTranscriptionResult(text="hallo welt"), HttpTranscriptionResult(text="welt neu")]
+    revised = _audio(revision=1, samples=24000)
+    revised.runtime_config = config
+
+    outputs = _run_final(handler, revised)
+
+    assert outputs[0].text == "hallo welt welt neu"
+    assert len(_FakeOperation.instances) == 2
+    assert all(operation.kwargs["language"] == "de" for operation in _FakeOperation.instances)
+
+
+def test_bounded_runtime_auto_does_not_restore_setup_language(monkeypatch):
+    handler = _handler(monkeypatch, language="en", window_seconds=1, overlap_seconds=0.25)
+    source = _audio(samples=24000)
+    source.runtime_config = RuntimeConfig(
+        session=RealtimeSessionCreateRequest(type="realtime", audio={"input": {"transcription": {"language": "auto"}}})
+    )
+    _FakeOperation.results = [HttpTranscriptionResult(text="first words"), HttpTranscriptionResult(text="last words")]
+
+    result = _run_final(handler, source)
+
+    assert result[0].language_code is None
+    assert all(operation.kwargs["language"] is None for operation in _FakeOperation.instances[1:])

@@ -105,6 +105,8 @@ This document summarizes the Speech-to-Text (STT) implementations in the `STT/` 
   final requests proceed independently, with cancellation and session-safe delivery
 - Bounds pending finals to eight per pipeline; overflow produces a typed failure
   without uploading audio, and accepted finals retain their order
+- Optional bounded requests: `--openai_stt_window_seconds 30 --openai_stt_overlap_seconds 2`
+  retains completed text across updates and reopened turns; default `0` disables windowing
 - Endpoint capacity and provider quotas remain the inference service/proxy's responsibility
 - See [`docs/openai-compatible-stt.md`](../../../docs/openai-compatible-stt.md)
 

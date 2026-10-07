@@ -36,3 +36,11 @@ class OpenAICompatibleSTTHandlerArguments:
         default=60.0,
         metadata={"help": "HTTP request timeout in seconds."},
     )
+    openai_stt_window_seconds: float = field(
+        default=0.0,
+        metadata={"help": "Maximum audio seconds per HTTP request. 0 disables windowing. Try 30 for Qwen3-ASR/vLLM."},
+    )
+    openai_stt_overlap_seconds: float = field(
+        default=2.0,
+        metadata={"help": "Audio overlap between STT windows; must be less than the window. Default: 2 seconds."},
+    )

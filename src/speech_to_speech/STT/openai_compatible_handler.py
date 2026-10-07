@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import logging
+import math
 import os
 import wave
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass, field
@@ -27,6 +29,7 @@ from speech_to_speech.pipeline.messages import (
     VADAudio,
 )
 from speech_to_speech.pipeline.speculative_turns import SpeculativeTurnTracker
+from speech_to_speech.STT.audio_windows import CompletedAudioWindow, reconcile_overlap
 from speech_to_speech.STT.base_stt_handler import BaseSTTHandler
 
 logger = logging.getLogger(__name__)
@@ -171,7 +174,18 @@ class HttpTranscriptionOperation:
             response.raise_for_status()
             return self._parse_response(response.content, response.headers.get("content-type", ""))
         except httpx.HTTPStatusError as exc:
-            raise TranscriptionRequestError(f"transcription server returned HTTP {exc.response.status_code}") from exc
+            # Never echo arbitrary server text (which can contain prompts, paths or
+            # credentials). Recognize known audio-limit errors and emit our own hint.
+            message = f"transcription server returned HTTP {exc.response.status_code}"
+            body = exc.response.text[:8192].lower()
+            if exc.response.status_code in {400, 413}:
+                if "maximum allowed duration" in body or "vllm_max_audio_decode_duration_s" in body:
+                    message += ": audio duration limit exceeded; enable or reduce openai_stt_window_seconds"
+                elif exc.response.status_code == 413 or "vllm_max_audio_clip_filesize_mb" in body:
+                    message += ": upload size limit exceeded; enable or reduce openai_stt_window_seconds"
+                elif "vllm_max_audio_decode_bytes" in body:
+                    message += ": decoded audio limit exceeded; enable or reduce openai_stt_window_seconds"
+            raise TranscriptionRequestError(message) from exc
         except httpx.TimeoutException as exc:
             raise TranscriptionRequestError("transcription request timed out") from exc
         except httpx.HTTPError as exc:
@@ -213,6 +227,11 @@ class _TranscriptionRequest:
     operation: HttpTranscriptionOperation | None = None
     cancelled: bool = False
     elapsed_s: float | None = None
+    selected_language: str | None = field(init=False)
+
+    def __post_init__(self) -> None:
+        # A session update must not change the hint halfway through a window batch.
+        self.selected_language = self.source.runtime_config.selected_language if self.source.runtime_config else None
 
 
 class OpenAICompatibleSTTHandler(BaseSTTHandler):
@@ -232,11 +251,21 @@ class OpenAICompatibleSTTHandler(BaseSTTHandler):
         speculative_turns: SpeculativeTurnTracker | None = None,
         final_revision_settle_s: float = 0.0,
         gen_kwargs: dict[str, Any] | None = None,
+        window_seconds: float = 0.0,
+        overlap_seconds: float = 2.0,
     ) -> None:
         if response_format not in {"json", "text"}:
             raise ValueError("OpenAI-compatible STT response_format must be 'json' or 'text'")
         if timeout <= 0:
             raise ValueError("OpenAI-compatible STT timeout must be > 0")
+        if not math.isfinite(window_seconds) or window_seconds < 0:
+            raise ValueError("STT window_seconds must be finite and >= 0")
+        if not math.isfinite(overlap_seconds) or overlap_seconds < 0:
+            raise ValueError("STT overlap_seconds must be finite and >= 0")
+        self._window_samples = int(window_seconds * PIPELINE_SAMPLE_RATE)
+        self._overlap_samples = int(overlap_seconds * PIPELINE_SAMPLE_RATE)
+        if window_seconds and self._window_samples <= self._overlap_samples:
+            raise ValueError("STT window_seconds must exceed overlap_seconds by at least one sample")
         model = model.strip() if model else None
         language = language.strip() if language else None
         if model is None and language is None:
@@ -263,6 +292,7 @@ class OpenAICompatibleSTTHandler(BaseSTTHandler):
         self._workers_running: set[str] = set()
         self._progressive_thread: Thread | None = None
         self._final_thread: Thread | None = None
+        self._completed_windows: OrderedDict[tuple[str, str | None], list[CompletedAudioWindow]] = OrderedDict()
         self.warmup()
 
     def warmup(self) -> None:
@@ -368,21 +398,7 @@ class OpenAICompatibleSTTHandler(BaseSTTHandler):
         try:
             if not self._request_is_current(request):
                 return
-            selected = source.runtime_config.selected_language if source.runtime_config else None
-            if selected is None:
-                operation = self._make_operation(source.audio)
-            else:
-                operation = self._make_operation(
-                    source.audio,
-                    language=None if selected == "auto" else selected,
-                    use_setup_language=False,
-                )
-            with self._request_lock:
-                request.operation = operation
-                if not self._request_is_current(request):
-                    operation.cancel("superseded")
-                    return
-            result = operation.run(cancel_check=lambda: not self._request_is_current(request))
+            result = self._transcribe_windows(request)
         except TranscriptionRequestCancelled:
             return
         except Exception as exc:
@@ -412,6 +428,82 @@ class OpenAICompatibleSTTHandler(BaseSTTHandler):
                 source.mode,
                 elapsed,
             )
+
+    def _run_audio_window(self, request: _TranscriptionRequest, audio: np.ndarray) -> HttpTranscriptionResult:
+        # Check between windows as well as during each HTTP request.
+        if not self._request_is_current(request):
+            raise TranscriptionRequestCancelled("superseded")
+        selected = request.selected_language
+        if selected is None:
+            operation = self._make_operation(audio)
+        else:
+            operation = self._make_operation(
+                audio, language=None if selected == "auto" else selected, use_setup_language=False
+            )
+        with self._request_lock:
+            request.operation = operation
+            if not self._request_is_current(request):
+                operation.cancel("superseded")
+                raise TranscriptionRequestCancelled("superseded")
+        result = operation.run(cancel_check=lambda: not self._request_is_current(request))
+        if not self._request_is_current(request):
+            raise TranscriptionRequestCancelled("superseded")
+        return result
+
+    def _transcribe_windows(self, request: _TranscriptionRequest) -> HttpTranscriptionResult:
+        audio = np.asarray(request.source.audio).squeeze()
+        if audio.ndim != 1:
+            raise ValueError("STT audio must be mono")
+        if not self._window_samples or len(audio) <= self._window_samples:
+            return self._run_audio_window(request, audio)
+        source = request.source
+        selected = request.selected_language
+        # A language selection change must not reuse text decoded under another hint.
+        key = (source.turn_id, selected) if source.turn_id is not None else None
+        with self._request_lock:
+            cached = list(self._completed_windows.get(key, [])) if key is not None else []
+        completed: list[CompletedAudioWindow] = []
+        text = ""
+        language = self.language if selected is None else (None if selected == "auto" else selected)
+        start = 0
+        step = self._window_samples - self._overlap_samples
+        # Always re-decode the last window, including after a speculative final.
+        while start < len(audio):
+            end = min(start + self._window_samples, len(audio))
+            chunk = audio[start:end]
+            digest = hashlib.sha256(chunk.tobytes()).digest()
+            index = len(completed)
+            stable = end < len(audio)
+            if stable and index < len(cached) and cached[index].digest == digest:
+                window = cached[index]
+            else:
+                cached = cached[:index]
+                result = self._run_audio_window(request, chunk)
+                window = CompletedAudioWindow(digest, result.text, result.language)
+            if start and not self._overlap_samples:
+                text = " ".join(part for part in (text, window.text) if part)
+            else:
+                text, matched = reconcile_overlap(text, window.text)
+                if start and self._overlap_samples and not matched:
+                    logger.warning("STT window overlap did not match; retaining both boundary transcripts")
+            language = window.language or language
+            if not stable:
+                break
+            completed.append(window)
+            with self._request_lock:
+                if not self._request_is_current(request):
+                    raise TranscriptionRequestCancelled("superseded")
+                if key is not None:
+                    existing = self._completed_windows.get(key, [])
+                    # Preserve a longer compatible prefix from the other worker lane.
+                    if existing[: len(completed)] != completed and existing[:index] == completed[:index]:
+                        self._completed_windows[key] = list(completed)
+                    if key in self._completed_windows:
+                        self._completed_windows.move_to_end(key)
+                    while len(self._completed_windows) > self._MAX_PENDING_FINAL_REQUESTS:
+                        self._completed_windows.popitem(last=False)
+            start += step
+        return HttpTranscriptionResult(text=text, language=language)
 
     def _publish_failure(self, request: _TranscriptionRequest, message: str) -> None:
         if not self._request_is_current(request):
@@ -478,6 +570,7 @@ class OpenAICompatibleSTTHandler(BaseSTTHandler):
     def on_session_end(self) -> None:
         with self._request_lock:
             self._session_generation += 1
+            self._completed_windows.clear()
             self._pending_finals.clear()
             self._pending_progressive = None
             for request in self._active.values():
@@ -488,6 +581,7 @@ class OpenAICompatibleSTTHandler(BaseSTTHandler):
         with self._request_lock:
             self._closed = True
             self._session_generation += 1
+            self._completed_windows.clear()
             self._pending_finals.clear()
             self._pending_progressive = None
             for request in self._active.values():

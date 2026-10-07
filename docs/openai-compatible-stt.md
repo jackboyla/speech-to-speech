@@ -11,7 +11,7 @@ VAD audio -> POST /v1/audio/transcriptions
 Each request uploads an in-memory mono PCM16 WAV at 16 kHz and accepts either
 JSON with a string `text` field or a plain-text response. With live
 transcription enabled, progressive updates upload the accumulated utterance
-again, increasing request volume and provider usage.
+again unless bounded windows are enabled below.
 
 ## vLLM with Qwen3-ASR
 
@@ -32,8 +32,52 @@ curl http://localhost:8000/v1/models
 speech-to-speech local \
   --stt openai \
   --openai_stt_base_url http://localhost:8000/v1 \
-  --openai_stt_model Qwen/Qwen3-ASR-1.7B
+  --openai_stt_model Qwen/Qwen3-ASR-1.7B \
+  --openai_stt_window_seconds 30 \
+  --openai_stt_overlap_seconds 2
 ```
+
+## Bounded audio windows
+
+Set `--openai_stt_window_seconds 30` to cap each transcription upload at 30
+seconds. `--openai_stt_overlap_seconds 2` keeps two seconds of shared audio
+between windows. The window must exceed the overlap; an overlap of zero allows
+hard cuts without text reconciliation. The default window is `0` (disabled),
+so existing short-turn behavior and provider usage stay unchanged.
+
+The handler retains completed window text for the current turn and transcribes
+only the outstanding tail on later updates. A reopened revision of that turn
+reuses completed windows when their audio and language selection still match.
+It re-decodes the final window even after a speculative final, so resumed speech
+can revise the tail. Internal window boundaries emit no turn-end event and do
+not trigger an assistant reply. If progressive work was skipped or disabled,
+the final request catches up through all remaining windows.
+
+At each boundary the handler looks for an exact match between the older text's
+suffix and the newer text's prefix, ignoring case and punctuation. It requires
+at least two words or CJK characters and checks at most 64 tokens. If the exact
+boundary fails, it accepts an exact anchor of at least three tokens within two
+tokens of both edges. This lets the new window revise a clipped ending and skips
+a clipped start, while retaining older text before the anchor. The newer window
+supplies the matched text. Ambiguous matches in repeated speech, and boundaries
+with no match, retain both parts
+and logs a warning. This can duplicate boundary words; repeated phrases can
+also produce false matches or omissions. This text heuristic cannot guarantee word alignment
+without timestamps. Evaluate your language, speaking rate and model before
+choosing a window and overlap. Windowing stays opt-in pending wider speech
+quality measurements.
+
+This caps recognition requests, not the VAD audio buffer. The VAD still supplies
+cumulative turn audio. The handler caches text and audio hashes for up to eight
+turn/language keys per pipeline, with no second retained audio copy. Session end
+clears this cache. Final and progressive workers can independently decode a
+window during a race, while the existing cancellation and stale-result checks
+still govern dispatch and publication.
+
+Known vLLM audio duration, upload size and decoded-audio limit errors produce a
+sanitized hint to enable or reduce the window. Set the cap below any stricter
+limit imposed by your provider. Setup still sends one second of silence to test
+the endpoint, independently of the turn window setting.
 
 ## OpenAI-hosted transcription
 

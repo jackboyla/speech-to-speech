@@ -262,6 +262,9 @@ For client-only TTS serving with vLLM-Omni or another compatible server, see
 For client-only speech recognition with vLLM, OpenAI's hosted Transcription API,
 or another compatible server, see
 [OpenAI-compatible STT](./docs/openai-compatible-stt.md).
+For long Qwen3-ASR/vLLM turns, add `--openai_stt_window_seconds 30 --openai_stt_overlap_seconds 2` to `--stt openai`. This bounds each upload and
+reuses completed window text; see [bounds and quality trade-offs](./docs/openai-compatible-stt.md#bounded-audio-windows).
+
 For native incremental audio and partial transcripts, see
 [stateful streaming STT](./docs/openai-compatible-stt.md#stateful-streaming-stt).
 
@@ -815,6 +818,17 @@ output and VAD probabilities. Run that reproduction alone with:
 ```bash
 CUDA_VISIBLE_DEVICES='' uv run pytest tests/openai_realtime/test_response_input_identity.py -q -s
 ```
+
+To check bounded HTTP request work without a model or GPU:
+
+```bash
+uv run python scripts/benchmark_asr_windows.py --durations 30 120 600 \
+  --windows 0 30 --max-request-seconds 60 --output /tmp/asr-window-work.json
+```
+
+The controlled server checks full transcript assembly and request limits using
+synthetic audio. Its latency reflects a chosen test delay, not model inference;
+it does not measure speech recognition accuracy or boundary WER.
 
 ## Star History
 
