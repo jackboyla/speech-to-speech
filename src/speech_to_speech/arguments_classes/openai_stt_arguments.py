@@ -44,12 +44,6 @@ class OpenAICompatibleSTTHandlerArguments:
         default=2.0,
         metadata={"help": "Audio overlap between STT windows; must be less than the window. Default: 2 seconds."},
     )
-    openai_stt_boundary_mode: str = field(
-        default="aligned",
-        metadata={
-            "help": "Bounded joins: aligned uses pauses/word times; text selects legacy heuristic joins. Default: aligned."
-        },
-    )
     openai_stt_aligner_model: Optional[str] = field(
         default=None,
         metadata={

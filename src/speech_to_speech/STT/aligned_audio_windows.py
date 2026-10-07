@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import unicodedata
 from dataclasses import dataclass
 
@@ -18,14 +17,20 @@ class AlignedAudioWindow:
     start: int
     end: int
     next_start: int
-    digest: bytes
     text: str
     language: str | None
     words: tuple[WordTiming, ...] = ()
 
 
-def audio_digest(audio: np.ndarray) -> bytes:
-    return hashlib.sha256(np.asarray(audio).tobytes()).digest()
+@dataclass(frozen=True)
+class RollingTranscript:
+    """Completed text and one boundary window; audio stays with the VAD."""
+
+    window: AlignedAudioWindow
+    text: str
+    offset: int
+    language: str | None
+    digest: bytes
 
 
 def _letters(text: str) -> str:

@@ -819,17 +819,11 @@ output and VAD probabilities. Run that reproduction alone with:
 CUDA_VISIBLE_DEVICES='' uv run pytest tests/openai_realtime/test_response_input_identity.py -q -s
 ```
 
-To check bounded HTTP request work without a model or GPU:
+To check bounded transcription, including resumed speech and cancellation:
 
 ```bash
-uv run python scripts/benchmark_asr_windows.py --durations 30 120 600 \
-  --windows 0 30 --overlap-seconds 4 --boundary-mode aligned \
-  --reopen-seconds 5 --max-request-seconds 60 --output /tmp/asr-window-work.json
+CUDA_VISIBLE_DEVICES='' uv run pytest tests/test_openai_stt_handler.py tests/test_aligned_audio_windows.py tests/test_word_alignment.py -q
 ```
-
-The controlled server checks full transcript assembly and request limits using
-synthetic audio. Its latency reflects a chosen test delay, not model inference;
-it does not measure speech recognition accuracy or boundary WER.
 
 ## Star History
 

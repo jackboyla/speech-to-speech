@@ -45,8 +45,8 @@ speech-to-speech local \
 
 Set `--openai_stt_window_seconds 30` to cap each transcription upload at 30
 seconds. `--openai_stt_overlap_seconds 4` keeps four seconds of shared audio.
-The default window is `0` (disabled). The default boundary mode is `aligned`;
-when windows are enabled, the handler requires at least half a second of overlap.
+The default window is `0` (disabled). Windows require at least half a second
+of overlap.
 
 The handler retains completed window text for the current turn and transcribes
 only the outstanding tail on later updates. A reopened turn reuses completed
@@ -54,7 +54,7 @@ windows when their audio and language still match. The last window stays
 revisable. Internal boundaries do not end the turn or trigger a reply. Final
 requests process all remaining windows even when progressive work was skipped.
 
-Aligned mode cuts at a confirmed interval of digital silence when possible.
+The handler cuts at a confirmed interval of digital silence when possible.
 For continuous speech, it matches adjacent words by both text and audio time,
 then keeps the newer text after that shared position. It preserves punctuation
 and repeated words. If the match is unclear, it transcribes one bounded section
@@ -73,19 +73,17 @@ is CPU. Supported language hints are `en`, `zh`, `yue`, `fr`, `de`, `it`, `ja`,
 tokenizer dependencies. Alignment locates recognized words; it cannot correct
 recognition errors or guarantee that supplied timestamps describe the audio.
 
-`--openai_stt_boundary_mode text` selects the earlier text-only join. It permits
-zero overlap and can repeat or omit words, especially in repeated phrases.
-Use aligned mode for new windowed deployments. Windowing remains opt-in until
-speech quality, supported languages and alignment cost justify a wider default.
+The handler keeps one rolling state per turn: completed text, an audio position
+and the last window's word times. Later updates resume there instead of joining
+every earlier window again. A hash of the completed audio rejects changed
+prefixes; shortened audio, language changes and session end reset the state.
+At most eight turn/language states are retained, without keeping another audio
+copy. The VAD still supplies cumulative audio, so this bounds recognition work
+rather than the VAD buffer. Concurrent workers keep the existing cancellation
+and stale-result checks.
 
-This caps recognition requests, not the VAD audio buffer. The VAD still supplies
-cumulative turn audio. The handler caches text and audio hashes for up to eight
-turn/language keys per pipeline, with no second retained audio copy. Session end
-clears this cache. Verified joins between completed windows are cached with
-their audio, text and timings, so later updates do not repeat earlier bridge
-requests. Audio changes and turn eviction discard those joins. Final and progressive workers can independently decode a
-window during a race, while the existing cancellation and stale-result checks
-still govern dispatch and publication.
+Windowing stays opt-in because alignment needs a supported language and adds
+model work. Alignment cannot correct recognition mistakes.
 
 Known vLLM audio duration, upload size and decoded-audio limit errors produce a
 sanitized hint to enable or reduce the window. Set the cap below any stricter
@@ -94,43 +92,15 @@ the endpoint, independently of the turn window setting.
 
 ## Window validation
 
-The HTTP stress test covers 30, 120 and 600 seconds of synthetic speech, with
-word timestamps and resumed finals. All bounded requests stay within 30 seconds
-and produce exact test transcripts. At 600 seconds, progressive uploads total
-2,798 seconds versus 36,900 without windows: 92.4% less audio. This measures
-transport work, not recognition quality or real model latency. Reproduce it:
+Tests cover 30/120/600-second requests, repeated words, resumed finals, changed
+audio, language changes, cancellation and invalid timings. Run the bounded-STT
+checks listed in the README.
 
-```bash
-uv run python scripts/benchmark_asr_windows.py --durations 30 120 600 \
-  --windows 0 30 --overlap-seconds 4 --boundary-mode aligned \
-  --reopen-seconds 5 --max-request-seconds 60 --output /tmp/asr-window-work.json
-```
-
-A small English LibriSpeech check uses Qwen3-ASR-0.6B-hf and the Qwen forced
-aligner with the production planner and joins. Clean 120-second speech has
-4.46% word error rate with windows, versus 4.83% for whole-recording recognition.
-A 62-second recording matches the baseline at 4.64%; shifted and noisy variants
-also complete. All 20 repetitions of one sentence survive, versus 18 in the
-whole-recording baseline. One 20-second bridge resolves a difficult boundary.
-These figures include recognition mistakes and cannot isolate boundary WER
-without reference word timestamps. They do not establish quality for other
-languages, Qwen3-ASR-1.7B or vLLM serving.
-
-CPU recognition plus alignment costs about 64 seconds on the clean 120-second
-case, versus 47 seconds for the whole recording. Whole-recording recognition
-therefore remains cheaper for this final-only CPU example; bounded windows
-address repeated progressive work and provider limits. Check quality and cost
-on your own audio before deployment.
-
-A native Transformers GPU check on one L40S completes six cases, including a
-600-second recording made from repeated labeled English clips. That long case
-has 3.54% word error rate (41 substitutions, 10 deletions, zero insertions).
-Nine progressive calls at 60-second intervals plus the final submit 840 seconds
-of audio; no backend call exceeds 30 seconds. The final call takes 6.96 seconds
-after earlier work has completed. Prefixes feed immediately rather than waiting
-for live playback. This checks real model work with the production planner; it
-does not measure HTTP or vLLM latency, unique ten-minute speech or boundary-only
-error rates.
+Small English Qwen3-ASR-0.6B checks matched or improved whole-recording word
+error rates. The repeated-sentence case kept all 20 sentences, versus 18 in the
+baseline; one bounded bridge repaired its difficult join. These checks do not
+establish other-language quality or boundary-only error rates. CPU alignment
+adds work; measure quality and latency with your model and audio before use.
 
 ## OpenAI-hosted transcription
 

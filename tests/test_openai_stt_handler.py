@@ -212,7 +212,7 @@ def _handler(
         Event(),
         queue_in=Queue(),
         queue_out=Queue(),
-        setup_kwargs={"speculative_turns": tracker, "boundary_mode": "text", **setup_overrides},
+        setup_kwargs={"speculative_turns": tracker, **setup_overrides},
     )
     _FakeOperation.results = []
     return handler
@@ -738,143 +738,6 @@ def test_openai_api_key_is_not_sent_to_other_endpoints(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("prefix", "tail", "expected", "matched"),
-    [
-        ("Start HELLO, WORLD!", "hello world again", "Start hello world again", True),
-        ("你好世界", "世界和平", "你好世界和平", True),
-        ("the old boundary", "a revised boundary", "the old boundary a revised boundary", False),
-        ("yes", "yes again", "yes yes again", False),
-        ("go go go go", "go go go go", "go go go go go go go go", False),
-        ("say it say it say it", "say it say it again", "say it say it say it say it say it again", False),
-        (
-            "in the season of the year, when.",
-            "Of season of the year, with other words",
-            "in the season of the year, with other words",
-            True,
-        ),
-        (
-            "Mason’s exquisite idles are as",
-            "Its exquisite idles are as good as ever",
-            "Mason’s exquisite idles are as good as ever",
-            True,
-        ),
-        (
-            "keep these three words",
-            "one two extra these three words continued",
-            "keep these three words one two extra these three words continued",
-            False,
-        ),
-        ("", "new words", "new words", True),
-        ("keep these words", "", "keep these words", True),
-    ],
-)
-def test_window_reconciliation_retains_unmatched_speech(prefix, tail, expected, matched):
-    from speech_to_speech.STT.audio_windows import reconcile_overlap
-
-    assert reconcile_overlap(prefix, tail) == (expected, matched)
-
-
-def test_bounded_requests_reuse_prefix_across_final_and_reopened_revision(monkeypatch):
-    handler = _handler(monkeypatch, window_seconds=1, overlap_seconds=0.25)
-    _FakeOperation.instances.clear()
-    _FakeOperation.results = [
-        HttpTranscriptionResult(text="first hello world"),
-        HttpTranscriptionResult(text="hello world partial"),
-    ]
-    partial = _run_progressive(handler, _audio("progressive", samples=24000))
-    assert partial[0].text == "first hello world partial"
-    assert len(_FakeOperation.instances) == 2
-
-    _FakeOperation.results = [HttpTranscriptionResult(text="hello world final")]
-    final = _run_final(handler, _audio(samples=24000))
-    assert final[0].text == "first hello world final"
-    assert len(_FakeOperation.instances) == 3
-
-    _FakeOperation.results = [
-        HttpTranscriptionResult(text="hello world final extra words"),
-        HttpTranscriptionResult(text="extra words continued"),
-    ]
-    reopened = _run_final(handler, _audio(revision=1, samples=40000))
-    assert reopened[0].text == "first hello world final extra words continued"
-    assert len(_FakeOperation.instances) == 5
-    for operation in _FakeOperation.instances:
-        with wave.open(io.BytesIO(operation.kwargs["wav_bytes"]), "rb") as wav:
-            assert wav.getnframes() <= PIPELINE_SAMPLE_RATE
-    assert not _FakeOperation.results
-
-
-@pytest.mark.parametrize("change", ["audio", "session", "language"])
-def test_completed_windows_are_invalidated_when_input_context_changes(monkeypatch, change):
-    handler = _handler(monkeypatch, window_seconds=1, overlap_seconds=0.25)
-    config = RuntimeConfig(
-        session=RealtimeSessionCreateRequest(type="realtime", audio={"input": {"transcription": {"language": "es"}}})
-    )
-    first = _audio("progressive", samples=24000)
-    first.runtime_config = config
-    _FakeOperation.results = [HttpTranscriptionResult(text="old first"), HttpTranscriptionResult(text="old last")]
-    _run_progressive(handler, first)
-    source = _audio("progressive", samples=24000)
-    source.runtime_config = config
-    if change == "audio":
-        source.audio[0] = 0.5
-    elif change == "session":
-        handler.on_session_end()
-    else:
-        config.session.audio.input.transcription.language = "de"
-    _FakeOperation.instances.clear()
-    _FakeOperation.results = [HttpTranscriptionResult(text="new first"), HttpTranscriptionResult(text="new last")]
-
-    outputs = _run_progressive(handler, source)
-
-    assert outputs[0].text == "new first new last"
-    assert len(_FakeOperation.instances) == 2
-    if change == "language":
-        assert all(operation.kwargs["language"] == "de" for operation in _FakeOperation.instances)
-
-
-def test_cancelled_window_does_not_launch_more_requests_or_cache_result(monkeypatch):
-    handler = _handler(monkeypatch, window_seconds=1, overlap_seconds=0.25)
-    started = Event()
-    release = Event()
-
-    class _BlockedWindowOperation(_FakeOperation):
-        def run(self, cancel_check=lambda: False):
-            started.set()
-            assert release.wait(timeout=2)
-            return HttpTranscriptionResult(text="cancelled text")
-
-    monkeypatch.setattr(stt_module, "HttpTranscriptionOperation", _BlockedWindowOperation)
-    _BlockedWindowOperation.instances = []
-    assert list(handler.process(_audio("progressive", samples=40000))) == []
-    try:
-        assert started.wait(timeout=1)
-        handler.on_session_end()
-    finally:
-        release.set()
-        assert handler._progressive_thread is not None
-        handler._progressive_thread.join(timeout=1)
-    assert not handler._progressive_thread.is_alive()
-    assert len(_BlockedWindowOperation.instances) == 1
-    assert handler.queue_out.empty()
-
-    monkeypatch.setattr(stt_module, "HttpTranscriptionOperation", _FakeOperation)
-    _FakeOperation.instances.clear()
-    _FakeOperation.results = [HttpTranscriptionResult(text="fresh first"), HttpTranscriptionResult(text="fresh last")]
-    outputs = _run_progressive(handler, _audio("progressive", samples=24000))
-    assert outputs[0].text == "fresh first fresh last"
-    assert len(_FakeOperation.instances) == 2
-
-
-def test_zero_audio_overlap_keeps_repeated_words(monkeypatch):
-    handler = _handler(monkeypatch, window_seconds=1, overlap_seconds=0)
-    _FakeOperation.results = [HttpTranscriptionResult(text="yes yes"), HttpTranscriptionResult(text="yes yes")]
-
-    outputs = _run_final(handler, _audio(samples=24000))
-
-    assert outputs[0].text == "yes yes yes yes"
-
-
-@pytest.mark.parametrize(
     ("window_seconds", "overlap_seconds"),
     [(float("nan"), 0), (float("inf"), 0), (-1, 0), (1, -1), (1, float("nan")), (1, 1), (0.00001, 0)],
 )
@@ -939,51 +802,42 @@ def test_http_audio_limit_errors_give_safe_window_hint(monkeypatch, status, body
 
 
 def test_language_hint_is_fixed_for_batch_and_new_revision_uses_update(monkeypatch):
-    handler = _handler(monkeypatch, window_seconds=1, overlap_seconds=0.25)
+    handler = _handler(monkeypatch, window_seconds=30, overlap_seconds=4)
+    backend = _install_timed_repetition_backend(monkeypatch)
     config = RuntimeConfig(
         session=RealtimeSessionCreateRequest(type="realtime", audio={"input": {"transcription": {"language": "es"}}})
     )
+    original_run = backend.run
 
-    class _UpdatingLanguageOperation(_FakeOperation):
-        def run(self, cancel_check=lambda: False):
-            result = super().run(cancel_check)
-            config.session.audio.input.transcription.language = "de"
-            return result
+    def update_language(operation, cancel_check=lambda: False):
+        result = original_run(operation, cancel_check)
+        config.session.audio.input.transcription.language = "de"
+        return result
 
-    monkeypatch.setattr(stt_module, "HttpTranscriptionOperation", _UpdatingLanguageOperation)
-    _FakeOperation.instances.clear()
-    _FakeOperation.results = [HttpTranscriptionResult(text="hola mundo"), HttpTranscriptionResult(text="mundo nuevo")]
-    source = _audio("progressive", samples=24000)
+    monkeypatch.setattr(backend, "run", update_language)
+    source = _timed_repetition_audio(40, mode="progressive")
     source.runtime_config = config
-
-    outputs = _run_progressive(handler, source)
-
-    assert outputs[0].text == "hola mundo mundo nuevo"
-    assert len(_FakeOperation.instances) == 2
-    assert all(operation.kwargs["language"] == "es" for operation in _FakeOperation.instances)
-
-    _FakeOperation.instances.clear()
-    _FakeOperation.results = [HttpTranscriptionResult(text="hallo welt"), HttpTranscriptionResult(text="welt neu")]
-    revised = _audio(revision=1, samples=24000)
+    assert _run_progressive(handler, source)[0].text.split() == ["very"] * 40
+    assert len(backend.instances) == 2
+    assert all(operation.kwargs["language"] == "es" for operation in backend.instances)
+    backend.instances.clear()
+    revised = _timed_repetition_audio(40, revision=1)
     revised.runtime_config = config
-
-    outputs = _run_final(handler, revised)
-
-    assert outputs[0].text == "hallo welt welt neu"
-    assert len(_FakeOperation.instances) == 2
-    assert all(operation.kwargs["language"] == "de" for operation in _FakeOperation.instances)
+    assert _run_final(handler, revised)[0].text.split() == ["very"] * 40
+    assert len(backend.instances) == 2
+    assert all(operation.kwargs["language"] == "de" for operation in backend.instances)
 
 
 def test_bounded_runtime_auto_does_not_restore_setup_language(monkeypatch):
-    handler = _handler(monkeypatch, language="en", window_seconds=1, overlap_seconds=0.25)
-    source = _audio(samples=24000)
+    handler = _handler(monkeypatch, language="en", window_seconds=3, overlap_seconds=1)
+    source = _audio(samples=16000 * 4)
+    source.audio[:] = 0.1
+    source.audio[40000:44000] = 0
     source.runtime_config = RuntimeConfig(
         session=RealtimeSessionCreateRequest(type="realtime", audio={"input": {"transcription": {"language": "auto"}}})
     )
     _FakeOperation.results = [HttpTranscriptionResult(text="first words"), HttpTranscriptionResult(text="last words")]
-
     result = _run_final(handler, source)
-
     assert result[0].language_code is None
     assert all(operation.kwargs["language"] is None for operation in _FakeOperation.instances[1:])
 
@@ -1019,8 +873,8 @@ def _install_timed_repetition_backend(monkeypatch):
 
 
 @pytest.mark.parametrize("seconds", [30, 120, 600])
-def test_aligned_windows_preserve_every_repetition_in_long_speech(monkeypatch, seconds):
-    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=30, overlap_seconds=4)
+def test_bounded_windows_preserve_every_repetition_in_long_speech(monkeypatch, seconds):
+    handler = _handler(monkeypatch, window_seconds=30, overlap_seconds=4)
     backend = _install_timed_repetition_backend(monkeypatch)
     outputs = _run_final(handler, _timed_repetition_audio(seconds))
     assert len(outputs) == 1 and isinstance(outputs[0], Transcription)
@@ -1029,9 +883,9 @@ def test_aligned_windows_preserve_every_repetition_in_long_speech(monkeypatch, s
     assert len(backend.instances) == max(1, (seconds - 4 + 25) // 26)
 
 
-@pytest.mark.parametrize("change", ["reopen", "audio", "session", "language"])
+@pytest.mark.parametrize("change", ["reopen", "audio", "session", "language", "shorter"])
 def test_aligned_window_cache_reuses_only_unchanged_context(monkeypatch, change):
-    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=30, overlap_seconds=4)
+    handler = _handler(monkeypatch, window_seconds=30, overlap_seconds=4)
     backend = _install_timed_repetition_backend(monkeypatch)
     config = RuntimeConfig(
         session=RealtimeSessionCreateRequest(type="realtime", audio={"input": {"transcription": {"language": "en"}}})
@@ -1040,7 +894,8 @@ def test_aligned_window_cache_reuses_only_unchanged_context(monkeypatch, change)
     first.runtime_config = config
     assert _run_progressive(handler, first)[0].text.split() == ["very"] * 40
     backend.instances.clear()
-    source = _timed_repetition_audio(66, revision=1)
+    seconds = 20 if change == "shorter" else 66
+    source = _timed_repetition_audio(seconds, revision=1)
     source.runtime_config = config
     if change == "audio":
         source.audio[0] += 1  # A changed sample invalidates the digest, without changing the word.
@@ -1049,14 +904,16 @@ def test_aligned_window_cache_reuses_only_unchanged_context(monkeypatch, change)
     elif change == "language":
         config.session.audio.input.transcription.language = "de"
     output = _run_final(handler, source)[0]
-    assert isinstance(output, Transcription) and output.text.split() == ["very"] * 66
-    assert len(backend.instances) == (2 if change == "reopen" else 3)
+    assert isinstance(output, Transcription) and output.text.split() == ["very"] * seconds
+    assert len(backend.instances) == (1 if change == "shorter" else (2 if change == "reopen" else 3))
+    if change == "shorter":
+        assert not handler._window_states
     if change == "language":
         assert all(operation.kwargs["language"] == "de" for operation in backend.instances)
 
 
 def test_cancel_during_word_alignment_discards_result_and_stops_http(monkeypatch):
-    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=3, overlap_seconds=1)
+    handler = _handler(monkeypatch, window_seconds=3, overlap_seconds=1)
     entered, release = Event(), Event()
 
     class BlockedAligner:
@@ -1081,7 +938,7 @@ def test_cancel_during_word_alignment_discards_result_and_stops_http(monkeypatch
         handler._progressive_thread.join(timeout=1)
     assert not handler._progressive_thread.is_alive()
     assert len(_FakeOperation.instances) == 1
-    assert not handler._aligned_windows
+    assert not handler._window_states
     assert handler.queue_out.empty()
 
 
@@ -1089,7 +946,7 @@ def test_cancel_during_word_alignment_discards_result_and_stops_http(monkeypatch
 def test_invalid_backend_word_metadata_never_falls_back_to_text_join(monkeypatch, corruption):
     from speech_to_speech.STT.word_alignment import WordTiming
 
-    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=3, overlap_seconds=1)
+    handler = _handler(monkeypatch, window_seconds=3, overlap_seconds=1)
     _FakeOperation.instances.clear()
     words = tuple(WordTiming(word, i + 0.1, i + 0.4) for i, word in enumerate(("one", "two", "three")))
     if corruption == "incomplete":
@@ -1105,13 +962,13 @@ def test_invalid_backend_word_metadata_never_falls_back_to_text_join(monkeypatch
     outputs = _run_final(handler, source)
     assert len(outputs) == 1 and isinstance(outputs[0], TranscriptionFailure)
     assert len(_FakeOperation.instances) == 1
-    assert not handler._aligned_windows
+    assert not handler._window_states
 
 
 def test_failed_alignment_join_retries_only_one_bounded_bridge(monkeypatch):
     from speech_to_speech.STT.word_alignment import WordTiming
 
-    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=3, overlap_seconds=1)
+    handler = _handler(monkeypatch, window_seconds=3, overlap_seconds=1)
     _FakeOperation.instances.clear()
     _FakeOperation.results = [
         HttpTranscriptionResult("one two", "en", (WordTiming("one", 0.1, 0.4), WordTiming("two", 1.1, 1.4))),
@@ -1132,7 +989,7 @@ def test_failed_alignment_join_retries_only_one_bounded_bridge(monkeypatch):
 def test_bridge_repair_keeps_source_offsets_correct_for_the_next_window(monkeypatch, change_audio):
     from speech_to_speech.STT.word_alignment import WordTiming
 
-    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=30, overlap_seconds=4)
+    handler = _handler(monkeypatch, window_seconds=30, overlap_seconds=4)
     backend = _install_timed_repetition_backend(monkeypatch)
     original_run = backend.run
 
@@ -1148,11 +1005,17 @@ def test_bridge_repair_keeps_source_offsets_correct_for_the_next_window(monkeypa
         return HttpTranscriptionResult(" ".join(w.text for w in words) + " ", "en", tuple(words))
 
     monkeypatch.setattr(backend, "run", inconsistent_boundary)
-    outputs = _run_final(handler, _timed_repetition_audio(66))
-    assert len(outputs) == 1 and isinstance(outputs[0], Transcription)
+    outputs = _run_progressive(handler, _timed_repetition_audio(66, mode="progressive"))
+    assert len(outputs) == 1 and isinstance(outputs[0], PartialTranscription)
     assert outputs[0].text.split() == ["very"] * 66
     assert [operation.start for operation in backend.instances] == [0, 26, 18, 52]
     assert all(operation.seconds <= 30 for operation in backend.instances)
+
+    backend.instances.clear()
+    final = _run_final(handler, _timed_repetition_audio(66))
+    assert len(final) == 1 and isinstance(final[0], Transcription)
+    assert final[0].text.split() == ["very"] * 66
+    assert [operation.start for operation in backend.instances] == [52]
 
     backend.instances.clear()
     reopened = _timed_repetition_audio(92, revision=1)
@@ -1175,8 +1038,8 @@ def test_bridge_repair_keeps_source_offsets_correct_for_the_next_window(monkeypa
         ("yue", "你好。", "再見。", "你好。再見。"),
     ],
 )
-def test_aligned_windows_cut_at_pause_without_loading_word_aligner(monkeypatch, language, first, last, expected):
-    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=3, overlap_seconds=1)
+def test_bounded_windows_cut_at_pause_without_loading_word_aligner(monkeypatch, language, first, last, expected):
+    handler = _handler(monkeypatch, window_seconds=3, overlap_seconds=1)
     _FakeOperation.instances.clear()
     _FakeOperation.results = [
         HttpTranscriptionResult(first, language),
@@ -1226,7 +1089,7 @@ def test_concurrent_pipeline_setup_shares_one_aligner_instance(monkeypatch):
 
 @pytest.mark.parametrize("dtype", [np.float32, np.int16])
 def test_silent_aligned_tail_never_calls_backend_or_adds_hallucinated_text(monkeypatch, dtype):
-    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=3, overlap_seconds=1)
+    handler = _handler(monkeypatch, window_seconds=3, overlap_seconds=1)
     _FakeOperation.instances.clear()
     _FakeOperation.results = [
         HttpTranscriptionResult("actual speech", "en"),
@@ -1306,7 +1169,7 @@ def test_http_transcription_rejects_malformed_word_metadata(words):
 def test_full_negative_pcm_amplitude_is_speech_not_silence(monkeypatch):
     from speech_to_speech.STT.word_alignment import WordTiming
 
-    handler = _handler(monkeypatch, boundary_mode="aligned", window_seconds=3, overlap_seconds=1)
+    handler = _handler(monkeypatch, window_seconds=3, overlap_seconds=1)
     _FakeOperation.instances.clear()
     _FakeOperation.results = [
         HttpTranscriptionResult("one two", "en", (WordTiming("one", 2.1, 2.3), WordTiming("two", 2.4, 2.7))),
@@ -1322,3 +1185,19 @@ def test_full_negative_pcm_amplitude_is_speech_not_silence(monkeypatch):
     assert len(outputs) == 1 and isinstance(outputs[0], Transcription)
     assert outputs[0].text == "one two three"
     assert len(_FakeOperation.instances) == 2
+
+
+def test_pause_spanning_old_window_end_never_moves_completed_audio_backwards(monkeypatch):
+    handler = _handler(monkeypatch, window_seconds=3, overlap_seconds=2)
+    backend = _install_timed_repetition_backend(monkeypatch)
+    source = _timed_repetition_audio(5, mode="progressive")
+    # The first window sees only 110 ms of this 120 ms pause. The next
+    # overlapping window sees it all, but its midpoint precedes the old end.
+    source.audio[int(2.89 * 16000) : int(3.01 * 16000)] = 0
+    assert _run_progressive(handler, source)[0].text.split() == ["very"] * 5
+    assert [operation.start for operation in backend.instances] == [0, 1, 2]
+    backend.instances.clear()
+    final = _timed_repetition_audio(5)
+    final.audio = source.audio.copy()
+    assert _run_final(handler, final)[0].text.split() == ["very"] * 5
+    assert [operation.start for operation in backend.instances] == [2]
