@@ -159,6 +159,27 @@ def parse_talk_arguments(argv: Sequence[str]) -> RealtimeAudioClientConfig:
         default=defaults.connection_retry_timeout_s,
         help="Seconds to wait for the Realtime endpoint to become available.",
     )
+    parser.add_argument(
+        "--wake-word",
+        default=defaults.wake_word,
+        help=(
+            "Send microphone audio only after this wake word: alexa, hey_jarvis, hey_mycroft, hey_rhasspy, "
+            "okay_nabu, or the path to an openWakeWord .tflite model. Needs the wakeword extra."
+        ),
+    )
+    parser.add_argument(
+        "--wake-word-threshold",
+        type=float,
+        default=defaults.wake_word_threshold,
+        help="Detection score from 0 to 1 needed to wake. Raise it if the client wakes by mistake.",
+    )
+    parser.add_argument(
+        "--wake-word-timeout",
+        dest="wake_word_timeout_s",
+        type=float,
+        default=defaults.wake_word_timeout_s,
+        help="Seconds of quiet, after the reply finishes playing, before the wake word is needed again.",
+    )
     namespace = parser.parse_args(list(argv))
     tools: list[dict[str, Any]] = []
     tool_executor = None
@@ -184,6 +205,9 @@ def parse_talk_arguments(argv: Sequence[str]) -> RealtimeAudioClientConfig:
         tools=tools,
         tool_executor=tool_executor,
         tool_response_create=tool_response_create,
+        wake_word=namespace.wake_word,
+        wake_word_threshold=namespace.wake_word_threshold,
+        wake_word_timeout_s=namespace.wake_word_timeout_s,
     )
 
 

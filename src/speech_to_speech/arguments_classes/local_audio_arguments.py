@@ -39,6 +39,30 @@ class LocalAudioArguments:
             "help": "Pause local microphone capture while audio is playing. Disabled by default so barge-in works."
         },
     )
+    local_audio_wake_word: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Send microphone audio only after this wake word: alexa, hey_jarvis, hey_mycroft, hey_rhasspy, "
+                "okay_nabu, or the path to an openWakeWord .tflite model. Needs the wakeword extra."
+            ),
+            "aliases": ["--wake-word"],
+        },
+    )
+    local_audio_wake_word_threshold: float = field(
+        default=0.5,
+        metadata={
+            "help": "Detection score from 0 to 1 needed to wake. Raise it if the client wakes by mistake.",
+            "aliases": ["--wake-word-threshold"],
+        },
+    )
+    local_audio_wake_word_timeout_s: float = field(
+        default=8.0,
+        metadata={
+            "help": "Seconds of quiet, after the reply finishes playing, before the wake word is needed again.",
+            "aliases": ["--wake-word-timeout"],
+        },
+    )
     local_audio_print_json: bool = field(
         default=False,
         metadata={"help": "Print raw Realtime events received by the packaged local audio client."},

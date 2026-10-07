@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import speech_to_speech.api.openai_realtime.audio_client as audio_client_module
 from speech_to_speech.arguments_classes.chat_completions_language_model_arguments import (
     ChatCompletionsLanguageModelHandlerArguments,
 )
@@ -75,10 +76,16 @@ def test_server_defaults_to_loopback():
     assert RealtimeServerArguments().host == "127.0.0.1"
 
 
-def test_parse_talk_arguments_keeps_retry_timeout_field_name():
-    config = parse_talk_arguments(["--connection-retry-timeout", "12.5"])
+def test_parse_talk_arguments_maps_option_field_names(monkeypatch):
+    monkeypatch.setattr(audio_client_module, "resolve_wake_word_model", lambda name: name)
+    config = parse_talk_arguments(
+        ["--connection-retry-timeout", "12.5", "--wake-word", "hey_jarvis", "--wake-word-timeout", "3"]
+    )
 
     assert config.connection_retry_timeout_s == 12.5
+    assert config.wake_word == "hey_jarvis"
+    assert config.wake_word_timeout_s == 3
+    assert parse_talk_arguments([]).wake_word is None
 
 
 def test_vad_firered_flag_is_accepted():

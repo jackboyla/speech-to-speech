@@ -44,9 +44,15 @@ def test_local_composes_loopback_client_with_same_server_builder(monkeypatch):
     args.realtime_server_kwargs.host = "192.0.2.10"
     args.realtime_server_kwargs.port = 9876
     args.local_audio_kwargs.local_audio_playback_buffer_ms = 240
+    args.local_audio_kwargs.local_audio_wake_word = "okay_nabu"
+    args.local_audio_kwargs.local_audio_wake_word_threshold = 0.7
     pipeline_handler = object()
     unit = SimpleNamespace(handlers=[pipeline_handler])
     monkeypatch.setattr("speech_to_speech.s2s_pipeline._build_pipeline_unit", lambda **_kwargs: unit)
+    monkeypatch.setattr(
+        "speech_to_speech.api.openai_realtime.audio_client.resolve_wake_word_model",
+        lambda name: name,
+    )
 
     manager = build_local_pipeline(args, Event())
 
@@ -61,6 +67,8 @@ def test_local_composes_loopback_client_with_same_server_builder(monkeypatch):
     assert client.config.url == f"ws://127.0.0.1:{server.port}/v1/realtime"
     assert client.config.api_key == "local"
     assert client.config.playback_buffer_ms == 240
+    assert client.config.wake_word == "okay_nabu"
+    assert client.config.wake_word_threshold == 0.7
 
 
 def test_local_resolves_backend_specific_playback_buffer_defaults(monkeypatch):

@@ -27,6 +27,7 @@ from jsonschema import SchemaError, ValidationError
 from jsonschema.validators import validator_for
 from openai import AsyncOpenAI
 
+from speech_to_speech.api.openai_realtime.wake_word import OpenWakeWordDetector, WakeWordGate, resolve_wake_word_model
 from speech_to_speech.pipeline.transcript_logging import log_exception
 
 logger = logging.getLogger(__name__)
@@ -67,10 +68,20 @@ class RealtimeAudioClientConfig:
     tools: list[dict[str, Any]] = field(default_factory=list)
     tool_executor: ToolExecutor | None = None
     tool_response_create: bool = True
+    wake_word: Optional[str] = None
+    wake_word_threshold: float = 0.5
+    wake_word_timeout_s: float = 8.0
 
     def __post_init__(self) -> None:
         if not 0 <= self.playback_buffer_ms < float("inf"):
             raise ValueError("playback_buffer_ms must be a finite non-negative number")
+        if self.wake_word is not None:
+            if not 0 < self.wake_word_threshold < 1:
+                raise ValueError("wake_word_threshold must be between 0 and 1")
+            if not 0 < self.wake_word_timeout_s < float("inf"):
+                raise ValueError("wake_word_timeout_s must be a finite positive number")
+            # Fail before any model loads if the extra or the model is missing.
+            resolve_wake_word_model(self.wake_word)
 
 
 def load_realtime_tool_module(module_name: str) -> tuple[list[dict[str, Any]], ToolExecutor, bool]:
@@ -869,6 +880,19 @@ async def _run_audio_session(
     playback = PlaybackBuffer(config.recv_rate, startup_buffer_ms=config.playback_buffer_ms)
     renderer = _FriendlyEventRenderer()
     tool_calls = _ToolCallCoordinator(conn, config)
+    wake_gate: WakeWordGate | None = None
+    if config.wake_word is not None:
+        wake_gate = WakeWordGate(
+            OpenWakeWordDetector(
+                config.wake_word,
+                threshold=config.wake_word_threshold,
+                sample_rate=config.send_rate,
+            ),
+            wake_word=config.wake_word,
+            timeout_s=config.wake_word_timeout_s,
+            sample_rate=config.send_rate,
+            playback_active=playback.is_active,
+        )
 
     def callback_recv(outdata: Any, _frames: int, _time_info: Any, status: Any) -> None:
         if status:
@@ -891,6 +915,10 @@ async def _run_audio_session(
                 chunk = await asyncio.to_thread(mic_queue.get, True, 0.1)
             except Empty:
                 continue
+            if wake_gate is not None:
+                chunk = wake_gate.filter(chunk)
+                if not chunk:
+                    continue
             await conn.send(
                 {
                     "type": "input_audio_buffer.append",
@@ -902,6 +930,8 @@ async def _run_audio_session(
         while not stop_event.is_set():
             event = await conn.recv()
             tool_calls.handle_event(event)
+            if wake_gate is not None:
+                wake_gate.handle_event(event)
             handle_server_event(
                 event,
                 playback=playback,

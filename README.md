@@ -196,6 +196,7 @@ pip install "speech-to-speech[faster-whisper]"  # Faster Whisper STT
 pip install "speech-to-speech[whisper-mlx]"     # Lightning Whisper MLX STT on macOS
 pip install "speech-to-speech[paraformer]"      # Paraformer STT through FunASR
 pip install "speech-to-speech[fireredvad]"      # FireRed streaming VAD
+pip install "speech-to-speech[wakeword]"        # openWakeWord wake word for talk and local
 pip install "speech-to-speech[nemo]"            # Parakeet Unified, Nemotron, and Orukeet STT through NeMo
 pip install "speech-to-speech[mlx-lm]"          # mlx-vlm support for vision models on macOS
 ```
@@ -285,6 +286,21 @@ This setting only controls the packaged Python client's speakers; browser and
 other Realtime clients manage their own playback buffers.
 
 The packaged client can opt in to local Python tools with `talk --tool-module <module>` or `local --tool-module <module>`. The module contract, programmatic API, and a Serper web-search example are documented in [Tool calling design](./src/speech_to_speech/api/openai_realtime/README.md#packaged-python-client-tools).
+
+### Wake word
+
+The packaged client can wait for a wake word before it sends any microphone audio, so the assistant ignores talk not meant for it. Install the `wakeword` extra, then pass `--wake-word` to `talk` or `local`:
+
+```bash
+pip install "speech-to-speech[wakeword]"
+speech-to-speech local --wake-word hey_jarvis
+```
+
+The client detects the word itself with [openWakeWord](https://github.com/dscripka/openWakeWord), the detector Home Assistant uses, and sends audio from the wake word onward. You can say the request in the same breath ("Hey Jarvis, what's the weather?"); the wake word stays out of the transcript. The client goes back to waiting once nobody has spoken, no response is running, and nothing has played for `--wake-word-timeout` seconds (default 8), so follow-up questions in a conversation need no wake word.
+
+Built-in words are `alexa`, `hey_jarvis`, `hey_mycroft`, `hey_rhasspy`, and `okay_nabu`. For another word, pass the path to an openWakeWord `.tflite` model, such as one from the [community collection](https://github.com/fwartner/home-assistant-wakewords-collection). If it wakes by mistake, raise `--wake-word-threshold` (default 0.5); if it misses you, lower it.
+
+Browser and other Realtime clients do not use this option; they decide for themselves when to send audio.
 
 ### Migrating from `--mode`
 

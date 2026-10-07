@@ -22,6 +22,7 @@ from speech_to_speech.api.openai_realtime.audio_client import (
     normalize_realtime_url,
     run_realtime_audio_client,
 )
+from speech_to_speech.api.openai_realtime.wake_word import WakeWordGate
 
 TOOL_DEFINITION = {
     "type": "function",
@@ -271,6 +272,61 @@ def test_playback_buffer_starts_immediately_by_default():
 def test_audio_client_rejects_invalid_playback_buffer(buffer_ms):
     with pytest.raises(ValueError, match="playback_buffer_ms"):
         RealtimeAudioClientConfig(playback_buffer_ms=buffer_ms)
+
+
+def test_audio_client_wake_word_requires_the_extra(monkeypatch):
+    monkeypatch.setitem(sys.modules, "pyopen_wakeword", None)
+
+    with pytest.raises(RuntimeError, match=r"speech-to-speech\[wakeword\]"):
+        RealtimeAudioClientConfig(wake_word="hey_jarvis")
+
+
+def test_wake_word_gate_sends_audio_from_the_wake_word_until_the_conversation_idles(capsys):
+    class FakeDetector:
+        def __init__(self):
+            self.resets = 0
+
+        def detect(self, audio):
+            return audio == b"WAKE"
+
+        def reset(self):
+            self.resets += 1
+
+    now = [0.0]
+    playing = [False]
+    detector = FakeDetector()
+    # 250 ms of pre-roll at 4 Hz is one sample: the last 2 bytes before the wake.
+    gate = WakeWordGate(
+        detector,
+        wake_word="hey_jarvis",
+        timeout_s=5.0,
+        sample_rate=4,
+        playback_active=lambda: playing[0],
+        clock=lambda: now[0],
+    )
+
+    assert gate.filter(b"chat") == b""
+    assert gate.filter(b"WAKE") == b"KE"
+    assert detector.resets == 1
+    assert gate.filter(b"ask?") == b"ask?"
+
+    gate.handle_event(SimpleNamespace(type="input_audio_buffer.speech_stopped"))
+    gate.handle_event(SimpleNamespace(type="response.created"))
+    now[0] = 20.0
+    assert gate.filter(b"barge") == b"barge"
+    gate.handle_event(SimpleNamespace(type="response.done"))
+    playing[0] = True
+    now[0] = 40.0
+    assert gate.filter(b"over") == b"over"
+    playing[0] = False
+    now[0] = 44.0
+    assert gate.filter(b"more") == b"more"
+
+    now[0] = 45.0
+    assert gate.filter(b"late") == b""
+    assert not gate.awake
+    assert gate.filter(b"chat") == b""
+    assert capsys.readouterr().out == "Say 'hey_jarvis' to start.\nListening.\nSay 'hey_jarvis' to start.\n"
 
 
 def test_audio_client_clears_unplayed_audio_on_barge_in(capsys):

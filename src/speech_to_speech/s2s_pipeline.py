@@ -695,23 +695,25 @@ def build_local_pipeline(args: ParsedArguments, stop_event: Event) -> ThreadMana
     tool_response_create = True
     if local_audio.local_audio_tool_module:
         tools, tool_executor, tool_response_create = load_realtime_tool_module(local_audio.local_audio_tool_module)
-    server_manager = build_pipeline(args, stop_event, host="127.0.0.1")
-    client = RealtimeAudioClient(
-        stop_event,
-        RealtimeAudioClientConfig(
-            url=f"ws://127.0.0.1:{args.realtime_server_kwargs.port}/v1/realtime",
-            api_key="local",
-            chunk_size=local_audio.local_audio_chunk_size,
-            playback_buffer_ms=playback_buffer_ms,
-            input_device=local_audio.local_audio_input_device,
-            output_device=local_audio.local_audio_output_device,
-            print_json=local_audio.local_audio_print_json,
-            block_mic_during_playback=local_audio.local_audio_block_mic_during_playback,
-            tools=tools,
-            tool_executor=tool_executor,
-            tool_response_create=tool_response_create,
-        ),
+    # Build the client config first so a bad wake word fails before the models load.
+    client_config = RealtimeAudioClientConfig(
+        url=f"ws://127.0.0.1:{args.realtime_server_kwargs.port}/v1/realtime",
+        api_key="local",
+        chunk_size=local_audio.local_audio_chunk_size,
+        playback_buffer_ms=playback_buffer_ms,
+        input_device=local_audio.local_audio_input_device,
+        output_device=local_audio.local_audio_output_device,
+        print_json=local_audio.local_audio_print_json,
+        block_mic_during_playback=local_audio.local_audio_block_mic_during_playback,
+        tools=tools,
+        tool_executor=tool_executor,
+        tool_response_create=tool_response_create,
+        wake_word=local_audio.local_audio_wake_word,
+        wake_word_threshold=local_audio.local_audio_wake_word_threshold,
+        wake_word_timeout_s=local_audio.local_audio_wake_word_timeout_s,
     )
+    server_manager = build_pipeline(args, stop_event, host="127.0.0.1")
+    client = RealtimeAudioClient(stop_event, client_config)
     return ThreadManager([*server_manager.handlers, client])
 
 
