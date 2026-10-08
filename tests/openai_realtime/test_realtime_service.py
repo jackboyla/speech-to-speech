@@ -187,22 +187,32 @@ class TestConnectionLifecycle:
             assert runtime_config.selected_language == expected
 
     def test_unsupported_session_language_is_rejected_without_changing_effective_config(
-        self, service, conn_id, runtime_config
+        self, service, conn_id, runtime_config, caplog
     ):
         service.stt_supported_languages = {"en", "es"}
         service.tts_supported_languages = {"en"}
         update = SessionUpdateEvent.model_validate(
             {
                 "type": "session.update",
-                "session": {"type": "realtime", "audio": {"input": {"transcription": {"language": "es"}}}},
+                "session": {
+                    "type": "realtime",
+                    "audio": {"input": {"transcription": {"language": "es"}}},
+                    "tools": [{"type": "function", "name": "get_weather"}],
+                    "tool_choice": "auto",
+                },
             }
         )
 
-        error = service.handle_session_update(conn_id, update)
+        with caplog.at_level("WARNING"):
+            error = service.handle_session_update(conn_id, update)
 
         assert isinstance(error, RealtimeErrorEvent)
         assert "TTS" in error.error.message
+        assert "session was not changed" in error.error.message
         assert runtime_config.selected_language is None
+        # The rejection covers the whole update, so the server names what it dropped.
+        assert runtime_config.session.tools is None
+        assert "audio, tool_choice, tools, type" in caplog.text
 
     def test_parakeet_route_rejects_named_session_language(self, service, conn_id, runtime_config):
         # Parakeet advertises no steerable STT languages to the session handler.

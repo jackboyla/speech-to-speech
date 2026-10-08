@@ -479,6 +479,12 @@ class RealtimeService:
             # A prefetch captured the previous session configuration.
             self.response.discard_tool_followup_prefetch(conn_id)
             self.response.maybe_start_tool_followup_prefetch(conn_id)
+            return error
+        # A rejected update applies none of its fields, so a client that ignores
+        # the error loses unrelated settings such as tools. Say so on both sides.
+        error.error.message += " The session was not changed."
+        fields = sorted(event.session.model_fields_set) if event.session is not None else []
+        logger.warning("Rejected session.update (%s); ignored fields: %s", error.error.message, ", ".join(fields))
         return error
 
     def handle_audio_append(self, conn_id: str, event: InputAudioBufferAppendEvent) -> list[bytes]:
