@@ -192,6 +192,7 @@ def test_revision_replaces_speaker_metadata_with_corrected_transcript(
 
 
 def test_disabled_diarization_preserves_plain_transcript(service, conn_id, runtime_config):
+    service.dispatch_pipeline_event(conn_id, SpeechStartedEvent())
     service.dispatch_pipeline_event(conn_id, TranscriptionCompletedEvent(transcript="plain text"))
     messages = [m for m in runtime_config.chat.to_transformers_chat() if m["role"] == "user"]
     assert messages[-1]["content"] == "plain text"
@@ -311,6 +312,7 @@ def test_compact_speaker_tag_survives_history_eviction(service, conn_id, runtime
     runtime_config.chat.size = history_size
     first_item_id = None
     for turn in range(history_size + 2):
+        service.dispatch_pipeline_event(conn_id, SpeechStartedEvent())
         wire = service.dispatch_pipeline_event(
             conn_id,
             TranscriptionCompletedEvent(

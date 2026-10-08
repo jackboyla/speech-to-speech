@@ -273,6 +273,9 @@ def test_stt_worker_discards_latency_when_revision_changes_during_inference(serv
             # Reopening while the model runs makes the final output stale at
             # the worker's output gate, before the notifier/service sees it.
             speculative_turns.observe("turn_1", 1)
+            service.dispatch_pipeline_event(
+                conn_id, SpeechStartedEvent(turn_id="turn_1", turn_revision=1, reopened=True)
+            )
             return "Superseded transcript"
         return "Current transcript"
 

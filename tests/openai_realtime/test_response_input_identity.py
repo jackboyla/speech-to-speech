@@ -113,6 +113,7 @@ async def test_late_client_tool_followup_does_not_commit_unfinished_speech(monke
             coordinator.handle_event(created)
         else:
             turn_id, revision, _ = tracker.speech_started(0)
+            service.dispatch_pipeline_event(conn_id, SpeechStartedEvent(turn_id=turn_id, turn_revision=revision))
             tracker.segment_finalized(100)
             supplied = (
                 TranscriptionCompletedEvent(transcript="Weather?", turn_id=turn_id, turn_revision=revision)
@@ -199,6 +200,7 @@ def test_tool_continuation_turn_after_newer_speech(runtime_config, prefetch, ass
     service._state(conn_id).runtime_config = runtime_config
     if associated:
         origin_id, revision, _ = tracker.speech_started(0)
+        service.dispatch_pipeline_event(conn_id, SpeechStartedEvent(turn_id=origin_id, turn_revision=revision))
         tracker.segment_finalized(100)
         service.dispatch_pipeline_event(
             conn_id,
@@ -310,6 +312,7 @@ def test_response_input_follows_supplied_revision_without_advancing_tracker(runt
     conn_id = service.register()
     service._state(conn_id).runtime_config = runtime_config
     tracker.speech_started(0)
+    service.dispatch_pipeline_event(conn_id, SpeechStartedEvent(turn_id="turn_1", turn_revision=0))
     tracker.segment_finalized(100)
     service.dispatch_pipeline_event(
         conn_id,
@@ -322,6 +325,7 @@ def test_response_input_follows_supplied_revision_without_advancing_tracker(runt
     service.close_pending_responses(conn_id)
     assert service.response_input_turn(conn_id)[:2] == ("turn_1", 0)
     tracker.speech_started(200)
+    service.dispatch_pipeline_event(conn_id, SpeechStartedEvent(turn_id="turn_1", turn_revision=1, reopened=True))
     # Speaking revision 1 has not replaced the supplied revision 0 yet.
     assert service.response_input_turn(conn_id)[:2] == ("turn_1", 0)
     assert tracker.current_turn() == ("turn_1", 1)

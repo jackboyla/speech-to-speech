@@ -112,6 +112,31 @@ Run the provider status regression tests without a model server or GPU:
 uv run pytest tests/test_provider_response_status.py -q
 ```
 
+### Input transcription terminal routing
+
+Completed and failed transcriptions use the `item_id` announced by
+`input_audio_buffer.speech_started` and retain that item's recorded duration.
+When a terminal carries `turn_id`, the server requires an exact match for
+`(turn_id, turn_revision)`; an unknown turn or revision never falls back to the
+current item. A missing revision matches only a lifecycle that also omitted it.
+
+Protocol-neutral pipelines may omit both fields when exactly one input item
+remains unresolved. This includes an older item still waiting for transcription
+after a newer item has completed. Pipelines with overlapping inputs must supply
+turn metadata. A revision without a turn ID cannot identify an item.
+
+If routing fails, the server emits a top-level `error` with `error.type` set to
+`ambiguous_transcription` (no metadata and several unresolved items) or
+`unmatched_transcription` (no matching lifecycle). It leaves input items, chat,
+queued responses, duration usage, and listening state unchanged. It does not
+emit an item-scoped transcription terminal or synthesize a standalone item.
+This replaces the legacy fallback that could complete the current input or an
+assistant item. Custom pipelines must emit `SpeechStartedEvent` before their
+terminal; emit `SpeechStoppedEvent` too when duration is available. Stale events
+that the turn tracker already rejects remain ignored. Partial transcription
+delta semantics and the existing commit point remain unchanged.
+
+
 ### Official Agents SDK compatibility
 
 CI pins `@openai/agents` 0.14.3 and runs independent integration jobs against

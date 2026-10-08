@@ -1998,6 +1998,7 @@ def test_stale_completed_revision_yields_exactly_one_llm_request_for_latest_revi
     connection_id = service.register()
     service._state(connection_id).runtime_config = RuntimeConfig()
     tracker.start_turn()
+    service.dispatch_pipeline_event(connection_id, SpeechStartedEvent(turn_id="turn_1", turn_revision=0))
     commit_count = 0
 
     def on_send(event: dict[str, Any], socket: _FakeSocket) -> None:
@@ -2009,6 +2010,9 @@ def test_stale_completed_revision_yields_exactly_one_llm_request_for_latest_revi
             if commit_count == 1:
                 tracker.segment_finalized(100)
                 assert tracker.speech_started(100) == ("turn_1", 1, True)
+                service.dispatch_pipeline_event(
+                    connection_id, SpeechStartedEvent(turn_id="turn_1", turn_revision=1, reopened=True)
+                )
             socket.incoming.put(
                 json.dumps(
                     {

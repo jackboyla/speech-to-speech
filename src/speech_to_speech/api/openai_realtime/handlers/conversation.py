@@ -329,19 +329,19 @@ class ConversationHandler(RealtimeBaseHandler):
             logger.debug("Ignoring input terminal for released item=%s", item_id)
         return input_item
 
-    def _completion_input_item_id(
+    def _terminal_input_item_id(
         self,
         conn_id: str,
         turn_id: str | None,
         turn_revision: int | None,
     ) -> str | None:
-        """Resolve a final to its routed item, falling back to the active input."""
+        """Match explicit metadata exactly, or use the sole unresolved item."""
         st = self._state(conn_id)
         if turn_id is not None:
-            routed_item_id = st.input_item_by_turn_revision.get((turn_id, turn_revision))
-            if routed_item_id is not None:
-                return routed_item_id
-        return st.current_input_item_id
+            return st.input_item_by_turn_revision.get((turn_id, turn_revision))
+        if turn_revision is None and len(st.input_items) == 1:
+            return next(iter(st.input_items))
+        return None
 
     def on_transcription_completed(
         self,
@@ -350,18 +350,13 @@ class ConversationHandler(RealtimeBaseHandler):
     ) -> list[ConversationItemInputAudioTranscriptionCompletedEvent]:
         """Terminalize one transcript item and emit its authoritative final event."""
         st = self._state(conn_id)
-        item_id = self._completion_input_item_id(conn_id, event.turn_id, event.turn_revision)
+        item_id = self._terminal_input_item_id(conn_id, event.turn_id, event.turn_revision)
         if item_id is None:
-            # Preserve the pre-routing fallback for protocol-neutral pipelines
-            # that do not publish speech lifecycle metadata. #485 tracks a
-            # stricter standalone/ambiguous-terminal policy.
-            item_id = self._service.response._current_item_id(conn_id)
-            duration_s = st.input_audio_duration_s
-        else:
-            input_item = self._closing_input_item(conn_id, item_id)
-            if input_item is None:
-                return []
-            duration_s = input_item.audio_duration_s
+            return []
+        input_item = self._closing_input_item(conn_id, item_id)
+        if input_item is None:
+            return []
+        duration_s = input_item.audio_duration_s
         st.response_usage.audio_duration_s += duration_s
         return [
             ConversationItemInputAudioTranscriptionCompletedEvent(
@@ -383,11 +378,7 @@ class ConversationHandler(RealtimeBaseHandler):
         event: TranscriptionFailedEvent,
     ) -> list[ConversationItemInputAudioTranscriptionFailedEvent]:
         """Terminalize one transcript item and emit its item-scoped failure."""
-        st = self._state(conn_id)
-        if event.turn_id is not None:
-            item_id = st.input_item_by_turn_revision.get((event.turn_id, event.turn_revision))
-        else:
-            item_id = st.current_input_item_id
+        item_id = self._terminal_input_item_id(conn_id, event.turn_id, event.turn_revision)
         if item_id is None:
             logger.debug(
                 "Ignoring transcription failure for unknown turn=%s rev=%s",

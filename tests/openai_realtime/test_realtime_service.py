@@ -1798,6 +1798,7 @@ class TestHandleResponseCreate:
         assert st.response_pending is True
 
     def test_response_create_while_implicit_response_pending(self, service, conn_id, text_prompt_queue):
+        service.dispatch_pipeline_event(conn_id, SpeechStartedEvent())
         service.dispatch_pipeline_event(
             conn_id,
             TranscriptionCompletedEvent(transcript="implicit request"),
@@ -1815,6 +1816,7 @@ class TestHandleResponseCreate:
         assert text_prompt_queue.empty()
 
     def test_finishing_active_response_preserves_next_implicit_pending_key(self, service, conn_id, text_prompt_queue):
+        service.dispatch_pipeline_event(conn_id, SpeechStartedEvent())
         service.response._ensure_response(conn_id, "response_a")
         service.dispatch_pipeline_event(
             conn_id,
@@ -1861,6 +1863,7 @@ class TestHandleResponseCreate:
     def test_response_create_preserves_latest_user_turn_timing(self, service, conn_id, text_prompt_queue):
         service.speculative_turns = SpeculativeTurnTracker()
         service.speculative_turns.observe("turn_1", 2)
+        service.dispatch_pipeline_event(conn_id, SpeechStartedEvent(turn_id="turn_1", turn_revision=2))
         service.dispatch_pipeline_event(
             conn_id,
             TranscriptionCompletedEvent(
@@ -1909,6 +1912,7 @@ class TestHandleResponseCreate:
         service.speculative_turns = SpeculativeTurnTracker()
         service.speculative_turns.observe("turn_1", 2)
         assert select_language("es") is None
+        service.dispatch_pipeline_event(conn_id, SpeechStartedEvent(turn_id="turn_1", turn_revision=2))
         service.dispatch_pipeline_event(
             conn_id,
             TranscriptionCompletedEvent(
@@ -2199,6 +2203,7 @@ class TestHandleResponseCreate:
         assert len(chat.buffer) == 1  # in-band input is threaded into the conversation
 
     def test_response_create_out_of_band_carries_null_turn(self, service, conn_id, text_prompt_queue):
+        service.dispatch_pipeline_event(conn_id, SpeechStartedEvent(turn_id="turn_1", turn_revision=2))
         service.dispatch_pipeline_event(
             conn_id,
             TranscriptionCompletedEvent(
@@ -2513,6 +2518,7 @@ class TestFinishAudioResponse:
             metadata[TURN_LATENCY_METADATA_KEY] = "client-value-must-not-win"
         service.speculative_turns = SpeculativeTurnTracker()
         service.speculative_turns.observe("turn_1", 1)
+        service.dispatch_pipeline_event(conn_id, SpeechStartedEvent(turn_id="turn_1", turn_revision=1))
         service.dispatch_pipeline_event(
             conn_id, TranscriptionCompletedEvent(transcript="Hello", turn_id="turn_1", turn_revision=1)
         )
@@ -3122,7 +3128,9 @@ class TestDispatchPipelineEvent:
 
         events = service.dispatch_pipeline_event(conn_id, failure)
 
-        assert events == []
+        assert len(events) == 1
+        assert isinstance(events[0], RealtimeErrorEvent)
+        assert events[0].error.type == "unmatched_transcription"
         assert not should_listen.is_set()
         state = service._state(conn_id)
         assert state.current_input_item_id == newer_started[0].item_id
@@ -3971,6 +3979,7 @@ class TestDispatchPipelineEvent:
         conn_id = service.register()
         service._state(conn_id).runtime_config = runtime_config
         turn_id, revision = tracker.start_turn()
+        service.dispatch_pipeline_event(conn_id, SpeechStartedEvent(turn_id=turn_id, turn_revision=revision))
         service.dispatch_pipeline_event(
             conn_id,
             TranscriptionCompletedEvent(transcript="Weather?", turn_id=turn_id, turn_revision=revision),
@@ -4489,7 +4498,8 @@ class TestDispatchPipelineEvent:
         assert first_item_id not in input_items
         assert input_items[second_item_id].transcript_prefix == "world today"
 
-    def test_metadata_less_completion_keeps_the_current_input_item(self, service, conn_id):
+    @pytest.mark.parametrize("newer_completed", [False, True])
+    def test_metadata_less_completion_keeps_the_sole_input_item(self, service, conn_id, newer_completed):
         started = service.dispatch_pipeline_event(
             conn_id,
             SpeechStartedEvent(turn_id="turn_1", turn_revision=0),
@@ -4499,6 +4509,13 @@ class TestDispatchPipelineEvent:
             PartialTranscriptionEvent(delta="current", turn_id="turn_1", turn_revision=0),
         )
 
+        service.dispatch_pipeline_event(conn_id, SpeechStoppedEvent(duration_s=2.5, turn_id="turn_1", turn_revision=0))
+        if newer_completed:
+            service.dispatch_pipeline_event(conn_id, SpeechStartedEvent(turn_id="turn_2", turn_revision=0))
+            service.dispatch_pipeline_event(
+                conn_id, TranscriptionCompletedEvent(transcript="newer", turn_id="turn_2", turn_revision=0)
+            )
+            assert service._state(conn_id).current_input_item_id is None
         completed = service.dispatch_pipeline_event(
             conn_id,
             TranscriptionCompletedEvent(transcript="metadata-less"),
@@ -4507,37 +4524,65 @@ class TestDispatchPipelineEvent:
         current_item_id = started[0].item_id
         state = service._state(conn_id)
         assert completed[0].item_id == current_item_id
+        assert completed[0].usage.seconds == 2.5
         assert current_item_id not in state.input_items
         assert state.current_input_item_id is None
         assert state.input_item_by_turn_revision == {}
 
     # -- transcription_completed --
 
-    def test_transcription_completed_without_speech_start_preserves_legacy_fallback(
-        self,
-        service,
-        conn_id,
-        runtime_config,
-        text_prompt_queue,
+    @pytest.mark.parametrize("terminal", ["completed", "failed"])
+    @pytest.mark.parametrize(
+        "scenario",
+        ["missing", "missing_active_response", "ambiguous", "unknown_turn", "wrong_revision", "revision_only"],
+    )
+    def test_unmatched_transcription_terminal_preserves_conversation(
+        self, service, conn_id, runtime_config, text_prompt_queue, should_listen, terminal, scenario
     ):
-        events = service.dispatch_pipeline_event(
-            conn_id,
-            TranscriptionCompletedEvent(
-                transcript="standalone final",
-                turn_id="turn_1",
-                turn_revision=2,
-            ),
+        if scenario == "missing_active_response":
+            service.response._ensure_response(conn_id, "active_response")
+        if not scenario.startswith("missing"):
+            service.dispatch_pipeline_event(conn_id, SpeechStartedEvent(turn_id="turn_1", turn_revision=0))
+            service.dispatch_pipeline_event(
+                conn_id, SpeechStoppedEvent(duration_s=1.5, turn_id="turn_1", turn_revision=0)
+            )
+        if scenario == "ambiguous":
+            service.dispatch_pipeline_event(conn_id, SpeechStartedEvent(turn_id="turn_2", turn_revision=0))
+        state = service._state(conn_id)
+        assistant_before = (state.current_item_id, state.current_response_id, state.in_response)
+        items_before = {key: value.model_dump() for key, value in state.input_items.items()}
+        routing_before = dict(state.input_item_by_turn_revision)
+        pending_before = {key: value.model_dump() for key, value in state.pending_input_terminals.items()}
+        should_listen.clear()
+        metadata = {}
+        if scenario == "unknown_turn":
+            metadata = {"turn_id": "unknown", "turn_revision": 0}
+        elif scenario == "wrong_revision":
+            metadata = {"turn_id": "turn_1", "turn_revision": 1}
+        elif scenario == "revision_only":
+            metadata = {"turn_revision": 0}
+        event = (
+            TranscriptionCompletedEvent(transcript="unmatched", **metadata)
+            if terminal == "completed"
+            else TranscriptionFailedEvent(message="unmatched", **metadata)
         )
 
+        events = service.dispatch_pipeline_event(conn_id, event)
+
         assert len(events) == 1
-        assert isinstance(events[0], ConversationItemInputAudioTranscriptionCompletedEvent)
-        assert events[0].transcript == "standalone final"
-        assert service._state(conn_id).input_item_by_turn_revision == {}
-        user_items = [item for item in runtime_config.chat.buffer if getattr(item, "role", None) == "user"]
-        assert [item.content[0].text for item in user_items] == ["standalone final"]
-        request = text_prompt_queue.get_nowait()
-        assert request.turn_id == "turn_1"
-        assert request.turn_revision == 2
+        assert isinstance(events[0], RealtimeErrorEvent)
+        assert events[0].error.type == (
+            "ambiguous_transcription" if scenario == "ambiguous" else "unmatched_transcription"
+        )
+        assert {key: value.model_dump() for key, value in state.input_items.items()} == items_before
+        assert state.input_item_by_turn_revision == routing_before
+        assert {key: value.model_dump() for key, value in state.pending_input_terminals.items()} == pending_before
+        assert state.response_usage.audio_duration_s == 0
+        assert (state.current_item_id, state.current_response_id, state.in_response) == assistant_before
+        assert runtime_config.chat.buffer == []
+        assert text_prompt_queue.empty()
+        assert not state.response_pending
+        assert not should_listen.is_set()
 
     def test_transcription_completed_emits_event(self, service, conn_id):
         service.dispatch_pipeline_event(conn_id, SpeechStartedEvent())
@@ -4654,6 +4699,7 @@ class TestDispatchPipelineEvent:
         service._state(conn_id).runtime_config = runtime_config
         if previous_turn:
             tracker.start_turn()
+            service.dispatch_pipeline_event(conn_id, SpeechStartedEvent(turn_id="turn_1", turn_revision=0))
             service.dispatch_pipeline_event(
                 conn_id, TranscriptionCompletedEvent(transcript="previous turn", turn_id="turn_1", turn_revision=0)
             )
@@ -4973,6 +5019,7 @@ class TestDispatchPipelineEvent:
         tracker = SpeculativeTurnTracker()
         service.speculative_turns = tracker
         turn_id, revision = tracker.start_turn()
+        service.dispatch_pipeline_event(conn_id, SpeechStartedEvent(turn_id=turn_id, turn_revision=revision))
         service.dispatch_pipeline_event(
             conn_id,
             TranscriptionCompletedEvent(transcript="first question", turn_id=turn_id, turn_revision=revision),

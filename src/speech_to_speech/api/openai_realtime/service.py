@@ -699,8 +699,27 @@ class RealtimeService:
 
     # ── STT → LM bridge ────────────────────────────
 
+    def _transcription_routing_error(
+        self, conn_id: str, event: TranscriptionCompletedEvent | TranscriptionFailedEvent
+    ) -> RealtimeErrorEvent | None:
+        """Reject terminals whose item cannot be identified without guessing."""
+        if self.conversation._terminal_input_item_id(conn_id, event.turn_id, event.turn_revision) is not None:
+            return None
+        if event.turn_id is None and event.turn_revision is None and len(self._state(conn_id).input_items) > 1:
+            return self.make_error(
+                "Transcription terminal needs turn metadata while multiple input items are unresolved.",
+                "ambiguous_transcription",
+            )
+        return self.make_error(
+            "Transcription terminal has no matching speech item. Emit speech_started with matching turn metadata first.",
+            "unmatched_transcription",
+        )
+
     def _on_transcription_completed(self, conn_id: str, event: TranscriptionCompletedEvent) -> list[ServerEvent]:
         """Handle a final STT transcription: emit protocol event, append to chat, trigger LM."""
+        routing_error = self._transcription_routing_error(conn_id, event)
+        if routing_error is not None:
+            return [routing_error]
         st = self._state(conn_id)
         completed_events = self.conversation.on_transcription_completed(conn_id, event)
         if not completed_events:
@@ -774,6 +793,9 @@ class RealtimeService:
 
     def _on_transcription_failed(self, conn_id: str, event: TranscriptionFailedEvent) -> list[ServerEvent]:
         """Surface a final STT failure without creating conversation or LLM work."""
+        routing_error = self._transcription_routing_error(conn_id, event)
+        if routing_error is not None:
+            return [routing_error]
         self.turn_latency_store.discard_pending_turn(event.turn_id, event.turn_revision)
         st = self._state(conn_id)
         current_input_item_id = st.current_input_item_id

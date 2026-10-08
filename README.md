@@ -816,6 +816,14 @@ output and VAD probabilities. Run that reproduction alone with:
 CUDA_VISIBLE_DEVICES='' uv run pytest tests/openai_realtime/test_response_input_identity.py -q -s
 ```
 
+To check transcription terminal routing, including missing speech events and
+ambiguous overlapping inputs:
+
+```bash
+CUDA_VISIBLE_DEVICES='' uv run pytest tests/openai_realtime/test_realtime_service.py -q \
+  -k 'transcription or overlapping'
+```
+
 ## Star History
 
 [![Star History Chart](assets/star-history.svg)](https://github.com/huggingface/speech-to-speech/stargazers)
