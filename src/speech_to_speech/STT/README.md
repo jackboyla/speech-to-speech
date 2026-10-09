@@ -100,16 +100,16 @@ This document summarizes the Speech-to-Text (STT) implementations in the `STT/` 
 
 - Handler: `MoonshineSTTHandler`
 - Model flag: `--moonshine_model_name` (default `moonshine-ai/moonshine-streaming-small`)
-  - Streaming checkpoints: `moonshine-ai/moonshine-streaming-{tiny,small,medium}` (34M, 123M, 245M parameters)
+  - English streaming checkpoints: `moonshine-ai/moonshine-streaming-{tiny,small,medium}` (34M, 123M, 245M parameters)
   - Against the default Parakeet TDT on two CPU cores (LibriSpeech test-clean / test-other WER, median latency): Parakeet 1.93% / 3.16% at 723 ms; streaming-small 2.40% / 6.76% at 680 ms; streaming-tiny 4.70% / 11.81% at 280 ms; streaming-medium 2.20% / 4.62% at 1099 ms. Moonshine is less accurate than Parakeet but much smaller, and the tiny checkpoints are the fastest local option on CPU
-  - Older checkpoints: `moonshine-ai/moonshine-tiny`, `moonshine-ai/moonshine-base`
-  - Language checkpoints: `moonshine-ai/moonshine-tiny-ja`, `moonshine-ai/moonshine-base-ko`, `moonshine-ai/moonshine-streaming-tiny-es`, and others
+  - Other languages: streaming checkpoints with a language suffix, such as `moonshine-ai/moonshine-streaming-small-ja` or `moonshine-ai/moonshine-streaming-tiny-es`
+  - Older checkpoints: `moonshine-ai/moonshine-tiny` and `moonshine-ai/moonshine-base`. Their non-English versions (`moonshine-ai/moonshine-tiny-ko` and so on) use the Moonshine AI Community License, which limits commercial use; the others are MIT
 - Language flag: `--moonshine_language` (optional ISO code)
 - Supported languages: each checkpoint knows one
-  - `en`, `ar`, `es`, `ja`, `ko`, `uk`, `vi`, `zh`
+  - `en`, `ar`, `de`, `es`, `ja`, `ko`, `tl`, `uk`, `vi`, `zh`
 - Behavior:
   - Without `--moonshine_language`, the handler reads the language from the checkpoint name suffix (`-ja` gives `ja`) and reports `en` when there is none
-  - Caps the tokens per request at `--moonshine_max_tokens_per_second` (default 6.5) times the audio length, as the model card advises, because the decoder can repeat itself on short or noisy audio. Raise it for languages that need more tokens per second
+  - Caps the tokens per request at `--moonshine_max_tokens_per_second` (default 6.5) times the audio length, because the decoder can repeat itself on short or noisy audio. The cards for the older non-English checkpoints use 13 (8 for Ukrainian), so raise the cap for those
 - Transformers runs Moonshine Streaming as a whole-utterance model; it does not stream inside a turn. Live transcription works through the usual progressive windows
 
 ### 9) OpenAI-compatible endpoint (`--stt openai`)
@@ -193,6 +193,7 @@ This document summarizes the Speech-to-Text (STT) implementations in the `STT/` 
 | `lt` | Lithuanian |
 | `ar` | Arabic |
 | `vi` | Vietnamese |
+| `tl` | Tagalog |
 | `auto` | Per-utterance automatic language detection |
 
 ## Usage Examples
@@ -262,7 +263,7 @@ speech-to-speech serve --stt qwen3-asr \
 speech-to-speech serve --stt moonshine
 speech-to-speech serve --stt moonshine --moonshine_model_name moonshine-ai/moonshine-streaming-tiny
 speech-to-speech serve --stt moonshine --moonshine_model_name moonshine-ai/moonshine-streaming-medium
-speech-to-speech serve --stt moonshine --moonshine_model_name moonshine-ai/moonshine-tiny-ja
+speech-to-speech serve --stt moonshine --moonshine_model_name moonshine-ai/moonshine-streaming-small-ja
 ```
 
 ### Parakeet Unified

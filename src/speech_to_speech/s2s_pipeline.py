@@ -527,6 +527,9 @@ def _build_handlers(
 def _stt_session_languages(selection: BackendSelection, handler: Any) -> set[str] | None:
     if selection.name == "nemotron-streaming" and getattr(handler, "_is_farsi", False):
         return {"fa"}
+    if selection.name == "moonshine":
+        # Each checkpoint transcribes one language and ignores session hints.
+        return {handler.start_language}
     if selection.name == "faster-whisper":
         supported = getattr(getattr(handler, "model", None), "supported_languages", None)
         return set(supported) if supported is not None else None

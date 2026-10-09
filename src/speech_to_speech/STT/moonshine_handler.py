@@ -25,7 +25,7 @@ SAMPLE_RATE = 16000
 
 # Each Moonshine checkpoint knows one language. Non-English checkpoints carry the code as a
 # name suffix, for example ``moonshine-ai/moonshine-tiny-ja``.
-SUPPORTED_LANGUAGES = ["en", "ar", "es", "ja", "ko", "uk", "vi", "zh"]
+SUPPORTED_LANGUAGES = ["en", "ar", "de", "es", "ja", "ko", "tl", "uk", "vi", "zh"]
 
 
 def language_from_model_name(model_name: str) -> str:
@@ -100,10 +100,11 @@ class MoonshineSTTHandler(BaseSTTHandler):
             return
 
         console.print(f"[yellow]USER: {text}")
+        self._record_final_stt(vad_audio, perf_counter() - start)
         yield Transcription(
             text=text,
             language_code=self.start_language,
             turn_id=vad_audio.turn_id,
             turn_revision=vad_audio.turn_revision,
-            speech_stopped_at_s=vad_audio.created_at_s,
+            speech_stopped_at_s=vad_audio.speech_end_at_s,
         )
