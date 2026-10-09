@@ -8,10 +8,12 @@ import numpy as np
 import pytest
 import torch
 
-from speech_to_speech.backend_registry import HandlerContext, create_backend_handler
+from speech_to_speech import s2s_pipeline
+from speech_to_speech.backend_registry import BackendSelection, HandlerContext, create_backend_handler
 from speech_to_speech.pipeline.cancel_scope import CancelScope
 from speech_to_speech.pipeline.messages import PartialTranscription, Transcription, VADAudio
 from speech_to_speech.pipeline.speculative_turns import SpeculativeTurnTracker
+from speech_to_speech.pipeline.turn_latency import TurnLatencyStore
 from speech_to_speech.s2s_pipeline import parse_arguments
 from speech_to_speech.STT import moonshine_handler
 from speech_to_speech.STT.moonshine_handler import MoonshineSTTHandler, language_from_model_name
@@ -79,7 +81,7 @@ def fake_transformers(monkeypatch: pytest.MonkeyPatch) -> _FakeTransformers:
     return fake
 
 
-def _build(argv: list[str]) -> tuple[MoonshineSTTHandler, HandlerContext]:
+def _build(argv: list[str]) -> tuple[MoonshineSTTHandler, HandlerContext, BackendSelection]:
     args = parse_arguments(["--stt", "moonshine", "--moonshine_device", "cpu", *argv])
     context = HandlerContext(
         stop_event=Event(),
@@ -96,7 +98,7 @@ def _build(argv: list[str]) -> tuple[MoonshineSTTHandler, HandlerContext]:
     )
     handler = create_backend_handler(args.stt_backend, context)
     assert isinstance(handler, MoonshineSTTHandler)
-    return handler, context
+    return handler, context, args.stt_backend
 
 
 def _vad_audio(mode: str, seconds: float) -> VADAudio:
@@ -105,7 +107,7 @@ def _vad_audio(mode: str, seconds: float) -> VADAudio:
         mode=mode,
         turn_id="turn_1",
         turn_revision=2,
-        created_at_s=123.0,
+        speech_end_at_s=123.0,
     )
 
 
@@ -116,6 +118,7 @@ def _vad_audio(mode: str, seconds: float) -> VADAudio:
         ("moonshine-ai/moonshine-base", "en"),
         ("moonshine-ai/moonshine-tiny-ja", "ja"),
         ("moonshine-ai/moonshine-streaming-tiny-es", "es"),
+        ("moonshine-ai/moonshine-streaming-small-de", "de"),
         ("/models/moonshine-base-zh/", "zh"),
     ],
 )
@@ -124,20 +127,24 @@ def test_language_from_model_name(model_name: str, expected: str) -> None:
 
 
 def test_cli_builds_a_moonshine_handler_that_warms_up(fake_transformers: _FakeTransformers) -> None:
-    handler, context = _build(["--moonshine_model_name", "moonshine-ai/moonshine-tiny-ko"])
+    handler, context, selection = _build(["--moonshine_model_name", "moonshine-ai/moonshine-tiny-ko"])
 
     assert handler.speculative_turns is context.speculative_turns
     assert ("processor", "moonshine-ai/moonshine-tiny-ko") in fake_transformers.loaded
     assert ("model", torch.float32) in fake_transformers.loaded
     assert handler.start_language == handler.last_language == "ko"
+    assert s2s_pipeline._stt_session_languages(selection, handler) == {"ko"}
     assert len(fake_transformers.model.generate_calls) == 1, "setup must run one warmup generation"
 
 
 def test_transcriptions_cap_new_tokens_by_audio_length(fake_transformers: _FakeTransformers) -> None:
-    handler, _ = _build(["--moonshine_language", "FR"])
+    handler, _, _ = _build(["--moonshine_language", "FR"])
+    handler.turn_latency_store = store = TurnLatencyStore()
 
-    final = list(handler.process(_vad_audio("final", seconds=2.0)))
     partial = list(handler.process(_vad_audio("progressive", seconds=0.1)))
+    assert store.get_or_create_for_turn("turn_1", 2).stt_s is None
+    final = list(handler.process(_vad_audio("final", seconds=2.0)))
+    assert store.get_or_create_for_turn("turn_1", 2).stt_s is not None
 
     assert final == [
         Transcription(
@@ -145,4 +152,4 @@ def test_transcriptions_cap_new_tokens_by_audio_length(fake_transformers: _FakeT
         )
     ]
     assert partial == [PartialTranscription(text="hello world", turn_id="turn_1", turn_revision=2)]
-    assert [call["max_length"] for call in fake_transformers.model.generate_calls] == [8, 14, 2]
+    assert [call["max_length"] for call in fake_transformers.model.generate_calls] == [8, 2, 14]

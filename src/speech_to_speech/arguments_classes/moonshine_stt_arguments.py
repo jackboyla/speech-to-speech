@@ -11,7 +11,7 @@ class MoonshineSTTHandlerArguments:
                 "The Moonshine checkpoint to load through Transformers. Streaming checkpoints come in "
                 "'tiny' (fastest), 'small' and 'medium' (most accurate, slowest); the older 'moonshine-ai/moonshine-tiny' and "
                 "'moonshine-ai/moonshine-base' also work, as do language checkpoints such as "
-                "'moonshine-ai/moonshine-tiny-ja'. Default is 'moonshine-ai/moonshine-streaming-small'."
+                "'moonshine-ai/moonshine-streaming-small-ja'. Default is 'moonshine-ai/moonshine-streaming-small'."
             )
         },
     )
@@ -45,7 +45,8 @@ class MoonshineSTTHandlerArguments:
         metadata={
             "help": (
                 "Caps the tokens generated per second of audio to stop repeat loops. "
-                "Raise it for languages that use more tokens per second, such as Japanese. Default is 6.5."
+                "Default is 6.5, as most model cards advise; the cards for the older non-English checkpoints "
+                "such as 'moonshine-ai/moonshine-tiny-ja' use 13, or 8 for Ukrainian."
             )
         },
     )
