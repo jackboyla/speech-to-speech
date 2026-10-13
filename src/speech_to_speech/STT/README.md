@@ -109,7 +109,7 @@ speech-to-speech local --stt whisper --language auto --stt_device cuda
 - Handler: `MoonshineSTTHandler`
 - Model flag: `--moonshine_model_name` (default `moonshine-ai/moonshine-streaming-small`)
   - English streaming checkpoints: `moonshine-ai/moonshine-streaming-{tiny,small,medium}` (34M, 123M, 245M parameters)
-  - Against the default Parakeet TDT on two CPU cores (LibriSpeech test-clean / test-other WER, median latency): Parakeet 1.93% / 3.16% at 723 ms; streaming-small 2.40% / 6.76% at 680 ms; streaming-tiny 4.70% / 11.81% at 280 ms; streaming-medium 2.20% / 4.62% at 1099 ms. Moonshine is less accurate than Parakeet but much smaller, and the tiny checkpoints are the fastest local option on CPU
+  - On two CPU cores (LibriSpeech test-clean / test-other WER on clips up to 20 s, median latency per utterance): Parakeet TDT 2.18% / 2.94% at 681 ms; streaming-medium 2.27% / 4.51% at 1273 ms; streaming-small 2.47% / 6.53% at 429 ms; streaming-tiny 5.05% / 11.21% at 175 ms. Moonshine is less accurate than Parakeet, most of all on noisy speech, but uses about a quarter of the memory and answers short clips faster on CPU
   - Other languages: streaming checkpoints with a language suffix, such as `moonshine-ai/moonshine-streaming-small-ja` or `moonshine-ai/moonshine-streaming-tiny-es`
   - Older checkpoints: `moonshine-ai/moonshine-tiny` and `moonshine-ai/moonshine-base`. Their non-English versions (`moonshine-ai/moonshine-tiny-ko` and so on) use the Moonshine AI Community License, which limits commercial use; the others are MIT
 - Language flag: `--moonshine_language` (optional ISO code)
