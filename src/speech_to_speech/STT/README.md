@@ -112,6 +112,7 @@ speech-to-speech local --stt whisper --language auto --stt_device cuda
   - On two CPU cores (LibriSpeech test-clean / test-other WER on clips up to 20 s, median latency per utterance): Parakeet TDT 2.18% / 2.94% at 681 ms; streaming-medium 2.27% / 4.51% at 1273 ms; streaming-small 2.47% / 6.53% at 429 ms; streaming-tiny 5.05% / 11.21% at 175 ms. Moonshine is less accurate than Parakeet, most of all on noisy speech, but uses about a quarter of the memory and answers short clips faster on CPU
   - Other languages: streaming checkpoints with a language suffix, such as `moonshine-ai/moonshine-streaming-small-ja` or `moonshine-ai/moonshine-streaming-tiny-es`
   - Older checkpoints: `moonshine-ai/moonshine-tiny` and `moonshine-ai/moonshine-base`. Their non-English versions (`moonshine-ai/moonshine-tiny-ko` and so on) use the Moonshine AI Community License, which limits commercial use; the others are MIT
+- Device flag: `--moonshine_device` (default `auto`). On Apple Silicon `auto` picks the CPU: Moonshine answers short clips 1.5–4x faster there than on MPS, and the GPU stays free for the MLX LLM and TTS
 - Language flag: `--moonshine_language` (optional ISO code)
 - Supported languages: each checkpoint knows one
   - `en`, `ar`, `de`, `es`, `ja`, `ko`, `tl`, `uk`, `vi`, `zh`

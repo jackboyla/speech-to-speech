@@ -17,6 +17,7 @@ from speech_to_speech.pipeline.turn_latency import TurnLatencyStore
 from speech_to_speech.s2s_pipeline import parse_arguments
 from speech_to_speech.STT import moonshine_handler
 from speech_to_speech.STT.moonshine_handler import MoonshineSTTHandler, language_from_model_name
+from speech_to_speech.utils import utils
 
 
 class _FakeInputs(dict):
@@ -126,9 +127,16 @@ def test_language_from_model_name(model_name: str, expected: str) -> None:
     assert language_from_model_name(model_name) == expected
 
 
-def test_cli_builds_a_moonshine_handler_that_warms_up(fake_transformers: _FakeTransformers) -> None:
-    handler, context, selection = _build(["--moonshine_model_name", "moonshine-ai/moonshine-tiny-ko"])
+def test_cli_builds_a_moonshine_handler_that_warms_up(
+    fake_transformers: _FakeTransformers, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An Apple Silicon machine: auto must still choose the CPU.
+    monkeypatch.setattr(utils, "_is_device_available", lambda device: device in ("mps", "cpu"))
+    handler, context, selection = _build(
+        ["--moonshine_model_name", "moonshine-ai/moonshine-tiny-ko", "--moonshine_device", "auto"]
+    )
 
+    assert handler.device == "cpu"
     assert handler.speculative_turns is context.speculative_turns
     assert ("processor", "moonshine-ai/moonshine-tiny-ko") in fake_transformers.loaded
     assert ("model", torch.float32) in fake_transformers.loaded

@@ -27,6 +27,10 @@ SAMPLE_RATE = 16000
 # name suffix, for example ``moonshine-ai/moonshine-tiny-ja``.
 SUPPORTED_LANGUAGES = ["en", "ar", "de", "es", "ja", "ko", "tl", "uk", "vi", "zh"]
 
+# ``auto`` skips MPS: on Apple Silicon these models run faster on the CPU, and staying off the
+# GPU leaves it to the MLX LLM and TTS. ``--moonshine_device mps`` still selects it.
+AUTO_DEVICES = tuple(device for device in TORCH_DEVICES if device != "mps")
+
 
 def language_from_model_name(model_name: str) -> str:
     """Read the language from a checkpoint name suffix; checkpoints without one are English."""
@@ -51,7 +55,7 @@ class MoonshineSTTHandler(BaseSTTHandler):
         gen_kwargs: Optional[dict[str, Any]] = None,
     ) -> None:
         logger.info("Loading Moonshine STT model: %s", model_name)
-        self.device = resolve_device(device, TORCH_DEVICES, "Moonshine")
+        self.device = resolve_device(device, AUTO_DEVICES if device == "auto" else TORCH_DEVICES, "Moonshine")
         self.torch_dtype = resolve_torch_dtype(torch_dtype, self.device)
         self.max_tokens_per_second = max_tokens_per_second
         self.gen_kwargs = dict(gen_kwargs or {})

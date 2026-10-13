@@ -18,7 +18,7 @@ class MoonshineSTTHandlerArguments:
     moonshine_device: str = field(
         default="auto",
         metadata={
-            "help": "The device to run on. Options: 'auto' (first available of CUDA, NPU, XPU, MPS, CPU), 'cuda', 'npu', 'xpu', 'mps', 'cpu'. Default is 'auto'."
+            "help": "The device to run on. Options: 'auto' (first available of CUDA, NPU, XPU, CPU; it skips MPS because Moonshine runs faster on the Apple Silicon CPU), 'cuda', 'npu', 'xpu', 'mps', 'cpu'. Default is 'auto'."
         },
     )
     moonshine_torch_dtype: str = field(
