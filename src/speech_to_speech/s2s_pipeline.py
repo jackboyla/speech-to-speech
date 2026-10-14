@@ -244,6 +244,13 @@ def parse_arguments(
         ]
     )
     parser = HfArgumentParser(tuple(argument_classes), prog=f"speech-to-speech {command}")  # type: ignore[arg-type]
+    if command == "local":
+        parser.add_argument(
+            "--no-interrupt-response",
+            dest="local_audio_interrupt_response",
+            action="store_false",
+            help="Keep assistant playback running during user speech, while continuing microphone input.",
+        )
     mac_action = parser._option_string_actions.pop("--mac_optimal_settings")
     mac_action.option_strings = [option for option in mac_action.option_strings if option != "--mac_optimal_settings"]
     if _mac_preset_enabled:
@@ -755,7 +762,6 @@ def build_local_pipeline(args: ParsedArguments, stop_event: Event) -> ThreadMana
     tool_response_create = True
     if local_audio.local_audio_tool_module:
         tools, tool_executor, tool_response_create = load_realtime_tool_module(local_audio.local_audio_tool_module)
-    server_manager = build_pipeline(args, stop_event, host="127.0.0.1")
     client = RealtimeAudioClient(
         stop_event,
         RealtimeAudioClientConfig(
@@ -767,11 +773,14 @@ def build_local_pipeline(args: ParsedArguments, stop_event: Event) -> ThreadMana
             output_device=local_audio.local_audio_output_device,
             print_json=local_audio.local_audio_print_json,
             block_mic_during_playback=local_audio.local_audio_block_mic_during_playback,
+            vad_threshold=local_audio.local_audio_vad_threshold,
+            interrupt_response=local_audio.local_audio_interrupt_response,
             tools=tools,
             tool_executor=tool_executor,
             tool_response_create=tool_response_create,
         ),
     )
+    server_manager = build_pipeline(args, stop_event, host="127.0.0.1")
     return ThreadManager([*server_manager.handlers, client])
 
 

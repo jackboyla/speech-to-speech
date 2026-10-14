@@ -126,6 +126,18 @@ def parse_talk_arguments(argv: Sequence[str]) -> RealtimeAudioClientConfig:
         help="Audio to buffer before playback starts, in milliseconds.",
     )
     parser.add_argument("--chunk-size", type=int, default=defaults.chunk_size)
+    parser.add_argument(
+        "--vad-threshold",
+        type=float,
+        default=defaults.vad_threshold,
+        help="Session VAD activation threshold (0–1). Omit to use the server threshold.",
+    )
+    parser.add_argument(
+        "--interrupt-response",
+        action=argparse.BooleanOptionalAction,
+        default=defaults.interrupt_response,
+        help="Allow speech to interrupt assistant playback. Disabling this keeps microphone input enabled.",
+    )
     parser.add_argument("--input-device", type=int, default=defaults.input_device)
     parser.add_argument("--output-device", type=int, default=defaults.output_device)
     parser.add_argument("--instructions", default=defaults.instructions)
@@ -172,6 +184,8 @@ def parse_talk_arguments(argv: Sequence[str]) -> RealtimeAudioClientConfig:
         send_rate=namespace.send_rate,
         recv_rate=namespace.recv_rate,
         playback_buffer_ms=namespace.playback_buffer_ms,
+        vad_threshold=namespace.vad_threshold,
+        interrupt_response=namespace.interrupt_response,
         chunk_size=namespace.chunk_size,
         input_device=namespace.input_device,
         output_device=namespace.output_device,

@@ -62,10 +62,12 @@ and `pipelines` mappings.
 | Pipeline `options` | Pipeline-wide options such as `device`, `mac_optimal_settings`, diarization, and `enable_visemes` / `stv_model_name` / `stv_device` |
 | `runtime` | Process settings: `log_level`, `log_transcripts`, and `torch_num_threads` |
 | `runtime.server` | Listener `host` and `port` |
-| `runtime.client` | Packaged client settings such as `url`, `voice`, `input_device`, `output_device`, `playback_buffer_ms`, and `tool_module` |
+| `runtime.client` | Packaged client settings such as `url`, `voice`, `input_device`, `output_device`, `playback_buffer_ms`, `vad_threshold`, `interrupt_response`, and `tool_module` |
 
 Settings use the existing [argument definitions](../src/speech_to_speech/arguments_classes/)
 and defaults. Unknown fields fail. Backend selectors belong in `backend`, not `settings`.
+For the microphone client's VAD and interruption settings, see
+[Configure microphone barge-in](../src/speech_to_speech/api/openai_realtime/README.md#configure-microphone-barge-in).
 
 To bypass STT, use `backend: none` with empty settings. The LLM backend and
 remote model must support audio input; diarization requires an STT backend.

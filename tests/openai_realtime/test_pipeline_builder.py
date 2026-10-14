@@ -2,6 +2,8 @@ import sys
 from threading import Event
 from types import SimpleNamespace
 
+import pytest
+
 from speech_to_speech.api.openai_realtime.audio_client import RealtimeAudioClient
 from speech_to_speech.api.openai_realtime.server import RealtimeServer
 from speech_to_speech.s2s_pipeline import build_local_pipeline, build_pipeline, parse_arguments
@@ -44,6 +46,8 @@ def test_local_composes_loopback_client_with_same_server_builder(monkeypatch):
     args.realtime_server_kwargs.host = "192.0.2.10"
     args.realtime_server_kwargs.port = 9876
     args.local_audio_kwargs.local_audio_playback_buffer_ms = 240
+    args.local_audio_kwargs.local_audio_vad_threshold = 0.8
+    args.local_audio_kwargs.local_audio_interrupt_response = False
     pipeline_handler = object()
     unit = SimpleNamespace(handlers=[pipeline_handler])
     monkeypatch.setattr("speech_to_speech.s2s_pipeline._build_pipeline_unit", lambda **_kwargs: unit)
@@ -61,6 +65,17 @@ def test_local_composes_loopback_client_with_same_server_builder(monkeypatch):
     assert client.config.url == f"ws://127.0.0.1:{server.port}/v1/realtime"
     assert client.config.api_key == "local"
     assert client.config.playback_buffer_ms == 240
+    assert client.config.vad_threshold == 0.8
+    assert client.config.interrupt_response is False
+
+
+def test_local_rejects_invalid_threshold_before_loading_models(monkeypatch):
+    args = parse_arguments(["--vad-threshold", "nan"], command="local")
+    monkeypatch.setattr(
+        "speech_to_speech.s2s_pipeline.build_pipeline", lambda *args, **kwargs: pytest.fail("loaded models")
+    )
+    with pytest.raises(ValueError, match="vad_threshold"):
+        build_local_pipeline(args, Event())
 
 
 def test_local_resolves_backend_specific_playback_buffer_defaults(monkeypatch):

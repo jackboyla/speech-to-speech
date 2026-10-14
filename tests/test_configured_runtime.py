@@ -203,6 +203,22 @@ def test_local_uses_one_client_and_preserves_explicit_settings(config, builder, 
     result.stop()
 
 
+@pytest.mark.parametrize("local", [False, True])
+def test_yaml_client_barge_in_controls_reach_session_payload(tmp_path, local):
+    from speech_to_speech.api.openai_realtime.audio_client import build_session_update
+
+    path = tmp_path / "config.yaml"
+    path.write_text(BASE + "runtime:\n  client:\n    vad_threshold: 0.8\n    interrupt_response: false\n")
+    config = resolve_config(load_config(path), names=["primary"], include_client=True, environ={})
+    client = runtime.build_configured_client(config, local=local)
+    assert build_session_update(client)["session"]["audio"]["input"]["turn_detection"] == {
+        "type": "server_vad",
+        "threshold": 0.8,
+        "interrupt_response": False,
+    }
+    assert client.block_mic_during_playback is False
+
+
 @pytest.mark.parametrize("field,value", [("host", "0.0.0.0"), ("url", "ws://example.test/realtime")])
 def test_local_conflicts_fail_before_workers(config, builder, field, value):
     config.pipelines = {"primary": config.pipelines["primary"]}

@@ -1,12 +1,15 @@
 import asyncio
+import base64
 import json
 import logging
 import signal
 import sys
 from threading import Event
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
+from openai.types.realtime import SessionUpdateEvent
 
 import speech_to_speech.api.openai_realtime.audio_client as audio_client_module
 from speech_to_speech.api.openai_realtime.audio_client import (
@@ -27,6 +30,7 @@ from speech_to_speech.api.openai_realtime.tool_followup import (
     TOOL_FOLLOWUP_METADATA_KEY,
     TOOL_INPUT_METADATA_KEY,
 )
+from speech_to_speech.pipeline.events import SpeechStartedEvent, SpeechStoppedEvent, TranscriptionCompletedEvent
 
 TOOL_DEFINITION = {
     "type": "function",
@@ -158,11 +162,14 @@ def test_audio_client_api_key_precedence_and_loopback_fallback(monkeypatch):
     assert client_kwargs[4]["api_key"] == "explicit-secret"
 
 
-def test_audio_client_sends_realtime_session_configuration():
+@pytest.mark.parametrize("threshold,interrupt", [(None, True), (0, False), (0.8, False), (1, True)])
+def test_audio_client_sends_realtime_session_configuration(threshold, interrupt):
     event = build_session_update(
         RealtimeAudioClientConfig(
             instructions="Be concise",
             voice="alloy",
+            vad_threshold=threshold,
+            interrupt_response=interrupt,
         )
     )
 
@@ -176,7 +183,8 @@ def test_audio_client_sends_realtime_session_configuration():
                 "input": {
                     "turn_detection": {
                         "type": "server_vad",
-                        "interrupt_response": True,
+                        "interrupt_response": interrupt,
+                        **({"threshold": threshold} if threshold is not None else {}),
                     }
                 },
                 "output": {"voice": "alloy"},
@@ -278,7 +286,14 @@ def test_audio_client_rejects_invalid_playback_buffer(buffer_ms):
         RealtimeAudioClientConfig(playback_buffer_ms=buffer_ms)
 
 
-def test_audio_client_clears_unplayed_audio_on_barge_in(capsys):
+@pytest.mark.parametrize("threshold", [-0.1, 1.1, float("inf"), float("-inf"), float("nan")])
+def test_audio_client_rejects_invalid_vad_threshold(threshold):
+    with pytest.raises(ValueError, match="vad_threshold"):
+        RealtimeAudioClientConfig(vad_threshold=threshold)
+
+
+@pytest.mark.parametrize("interrupt_response", [True, False])
+def test_audio_client_clears_unplayed_audio_on_barge_in(capsys, interrupt_response):
     playback = PlaybackBuffer(16000)
     renderer = _FriendlyEventRenderer()
     playback.append(b"\x01\x02" * 100)
@@ -288,10 +303,11 @@ def test_audio_client_clears_unplayed_audio_on_barge_in(capsys):
         playback=playback,
         renderer=renderer,
         print_json=False,
+        interrupt_response=interrupt_response,
     )
 
-    assert playback.buffered_bytes == 0
-    assert not playback.is_active()
+    assert playback.buffered_bytes == (0 if interrupt_response else 200)
+    assert playback.is_active() is not interrupt_response
     capsys.readouterr()
 
 
@@ -311,16 +327,19 @@ def test_audio_client_does_not_allocate_transcript_state_for_direct_audio_turns(
     capsys.readouterr()
 
 
-def test_audio_client_clears_unplayed_audio_when_response_is_cancelled(capsys):
+@pytest.mark.parametrize("interrupt_response", [True, False])
+@pytest.mark.parametrize("event_type", ["response.done", "output_audio_buffer.cleared"])
+def test_audio_client_clears_unplayed_audio_when_response_is_cancelled(capsys, interrupt_response, event_type):
     playback = PlaybackBuffer(16000)
     renderer = _FriendlyEventRenderer()
     playback.append(b"\x01\x02" * 100)
 
     handle_server_event(
-        SimpleNamespace(type="response.done", response=SimpleNamespace(status="cancelled")),
+        SimpleNamespace(type=event_type, response=SimpleNamespace(status="cancelled")),
         playback=playback,
         renderer=renderer,
         print_json=False,
+        interrupt_response=interrupt_response,
     )
 
     assert playback.buffered_bytes == 0
@@ -1475,6 +1494,56 @@ def test_audio_client_does_not_duplicate_partial_transcript_on_cancel(capsys):
 
     assert capsys.readouterr().out == "ASSISTANT: partial\nASSISTANT: <response cancelled>\n"
     assert playback.buffered_bytes == 0
+
+
+@pytest.mark.parametrize("requested,confirmed", [(False, None), (True, False), (False, True)])
+async def test_audio_session_honors_barge_in_policy_and_keeps_listening(
+    service, conn_id, monkeypatch, capsys, requested, confirmed
+):
+    config = RealtimeAudioClientConfig(vad_threshold=0.8, interrupt_response=requested)
+    update = build_session_update(config)
+    effective = requested if confirmed is None else confirmed
+    update["session"]["audio"]["input"]["turn_detection"]["interrupt_response"] = effective
+    assert service.handle_session_update(conn_id, SessionUpdateEvent.model_validate(update)) is None
+    state = service._state(conn_id)
+    assert state.runtime_config.session.audio.input.turn_detection.threshold == 0.8
+    if not effective:
+        service.response._ensure_response(conn_id)
+    # A finished server response can still have audio queued on the client.
+    pcm = b"\x01\x02" * 100
+    events = [] if confirmed is None else [service.build_session_updated(conn_id)]
+    events.append(SimpleNamespace(type="response.output_audio.delta", delta=base64.b64encode(pcm)))
+    speech_events = service.dispatch_pipeline_event(conn_id, SpeechStartedEvent())
+    assert state.in_response is not effective
+    assert [event.type for event in speech_events] == ["input_audio_buffer.speech_started"]
+    events.extend(speech_events)
+    events.extend(service.dispatch_pipeline_event(conn_id, SpeechStoppedEvent()))
+    events.extend(service.dispatch_pipeline_event(conn_id, TranscriptionCompletedEvent(transcript="Still listening")))
+    pending_events = iter(events)
+    sounddevice = SimpleNamespace(RawInputStream=Mock(), RawOutputStream=Mock())
+    monkeypatch.setitem(sys.modules, "sounddevice", sounddevice)
+    stop = Event()
+    played = bytearray(len(pcm))
+
+    class Connection(RecordingConnection):
+        async def recv(self):
+            event = next(pending_events, None)
+            if event is not None:
+                return event
+            sounddevice.RawInputStream.call_args.kwargs["callback"](pcm, 100, None, None)
+            await wait_until(lambda: bool(self.sent))
+            sounddevice.RawOutputStream.call_args.kwargs["callback"](played, 100, None, None)
+            stop.set()
+            await asyncio.Future()
+
+    conn = Connection()
+    await asyncio.wait_for(audio_client_module._run_audio_session(conn, config, stop), timeout=5)
+
+    assert played == (bytes(len(pcm)) if effective else pcm)
+    assert conn.sent == [{"type": "input_audio_buffer.append", "audio": base64.b64encode(pcm).decode("ascii")}]
+    assert "Still listening" in capsys.readouterr().out
+    assert state.in_response is not effective
+    assert config.interrupt_response is requested
 
 
 async def test_audio_streams_are_cleaned_up_when_output_start_fails(monkeypatch):

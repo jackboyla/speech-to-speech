@@ -39,6 +39,20 @@ class LocalAudioArguments:
             "help": "Pause local microphone capture while audio is playing. Disabled by default so barge-in works."
         },
     )
+    local_audio_vad_threshold: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "Session VAD activation threshold (0–1). Omit to use the server threshold.",
+            "aliases": ["--vad-threshold"],
+        },
+    )
+    local_audio_interrupt_response: bool = field(
+        default=True,
+        metadata={
+            "help": "Allow speech to interrupt assistant playback. Disabling this keeps microphone input enabled.",
+            "aliases": ["--interrupt-response"],
+        },
+    )
     local_audio_print_json: bool = field(
         default=False,
         metadata={"help": "Print raw Realtime events received by the packaged local audio client."},

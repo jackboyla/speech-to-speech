@@ -465,6 +465,18 @@ def test_packaged_audio_clients_have_no_general_playback_buffer_default():
     assert LocalAudioArguments().local_audio_playback_buffer_ms is None
 
 
+@pytest.mark.parametrize(
+    "argv,threshold,interrupt", [([], None, True), (["--vad-threshold", "0.8", "--no-interrupt-response"], 0.8, False)]
+)
+def test_packaged_audio_clients_accept_barge_in_controls(argv, threshold, interrupt):
+    talk = parse_talk_arguments(argv)
+    local = parse_arguments(argv, command="local").local_audio_kwargs
+    assert talk.vad_threshold == local.local_audio_vad_threshold == threshold
+    assert talk.interrupt_response == local.local_audio_interrupt_response == interrupt
+    assert talk.block_mic_during_playback is False
+    assert local.local_audio_block_mic_during_playback is False
+
+
 @pytest.mark.parametrize("flag", ["--log-transcripts", "--log_transcripts"])
 def test_talk_accepts_transcript_logging_opt_in(flag):
     assert parse_talk_arguments([]).log_transcripts is False
