@@ -249,7 +249,7 @@ def parse_arguments(
             "--no-interrupt-response",
             dest="local_audio_interrupt_response",
             action="store_false",
-            help="Keep assistant playback running during user speech, while continuing microphone input.",
+            help="Keep assistant playback running during user speech.",
         )
     mac_action = parser._option_string_actions.pop("--mac_optimal_settings")
     mac_action.option_strings = [option for option in mac_action.option_strings if option != "--mac_optimal_settings"]

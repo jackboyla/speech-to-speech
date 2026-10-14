@@ -404,16 +404,13 @@ sequenceDiagram
 
 ### Configure microphone barge-in
 
-The packaged `talk` and `local` clients accept `--vad-threshold` and
-`--no-interrupt-response`:
+Use `--vad-threshold` and `--no-interrupt-response` with `talk` or `local`:
 
 ```bash
 speech-to-speech talk --vad-threshold 0.8 --no-interrupt-response
-speech-to-speech local --vad-threshold 0.8 --no-interrupt-response
 ```
 
-For [YAML configuration](../../../../docs/configuration.md), set the same policy
-under `runtime.client`:
+In [YAML configuration](../../../../docs/configuration.md), use `runtime.client`:
 
 ```yaml
 runtime:
@@ -422,43 +419,33 @@ runtime:
     interrupt_response: false
 ```
 
-These map to `RealtimeAudioClientConfig.vad_threshold` and `interrupt_response`.
-The client sends them through the standard Realtime session update:
+The same fields on `RealtimeAudioClientConfig` set this session policy:
 
 ```json
 {
   "type": "session.update",
   "session": {
     "type": "realtime",
-    "audio": {
-      "input": {
-        "turn_detection": {
-          "type": "server_vad",
-          "threshold": 0.8,
-          "interrupt_response": false
-        }
-      }
-    }
+    "audio": {"input": {"turn_detection": {
+      "type": "server_vad", "threshold": 0.8, "interrupt_response": false
+    }}}
   }
 }
 ```
 
-By default, interruption stays enabled and the client omits `threshold`, leaving
-the server threshold in effect. An explicit threshold must be finite and in
-the range 0–1. A higher threshold can reduce false triggers, but it cannot tell
-the intended speaker from background speech; 0.8 is only an example.
+Interruption defaults to enabled. Omitting the threshold keeps the server's
+setting; an explicit value must be finite and in 0–1. Higher thresholds can
+reduce false triggers but cannot distinguish the intended speaker from background
+speech. The value 0.8 is only an example.
 
-With interruption disabled, speech-start events preserve queued assistant audio
-while microphone input and transcription continue. This differs from
-`block_mic_during_playback`, which drops microphone input while audio plays.
-The client follows the interruption setting confirmed by session events;
-explicit response cancellation and `output_audio_buffer.cleared` still clear
-playback.
+Disabling interruption preserves queued assistant audio on speech start.
+Microphone input and transcription continue unless `block_mic_during_playback`
+is also set. The client follows the policy confirmed by session events;
+explicit cancellation and `output_audio_buffer.cleared` still clear playback.
 
-Other clients must send this session policy and honor it when handling
-`input_audio_buffer.speech_started`. A client that clears playback on every
-speech start will still cut off replies. The browser demo and LiveKit example
-configure interruption separately from the packaged client.
+Other clients, including the browser demo, LiveKit, and Reachy, need their own
+session configuration and playback policy. Clearing playback unconditionally on
+`input_audio_buffer.speech_started` will still cut off replies.
 
 ## Testing
 

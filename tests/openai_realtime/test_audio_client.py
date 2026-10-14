@@ -292,8 +292,7 @@ def test_audio_client_rejects_invalid_vad_threshold(threshold):
         RealtimeAudioClientConfig(vad_threshold=threshold)
 
 
-@pytest.mark.parametrize("interrupt_response", [True, False])
-def test_audio_client_clears_unplayed_audio_on_barge_in(capsys, interrupt_response):
+def test_audio_client_clears_unplayed_audio_on_barge_in(capsys):
     playback = PlaybackBuffer(16000)
     renderer = _FriendlyEventRenderer()
     playback.append(b"\x01\x02" * 100)
@@ -303,11 +302,10 @@ def test_audio_client_clears_unplayed_audio_on_barge_in(capsys, interrupt_respon
         playback=playback,
         renderer=renderer,
         print_json=False,
-        interrupt_response=interrupt_response,
     )
 
-    assert playback.buffered_bytes == (0 if interrupt_response else 200)
-    assert playback.is_active() is not interrupt_response
+    assert playback.buffered_bytes == 0
+    assert not playback.is_active()
     capsys.readouterr()
 
 
@@ -1496,22 +1494,25 @@ def test_audio_client_does_not_duplicate_partial_transcript_on_cancel(capsys):
     assert playback.buffered_bytes == 0
 
 
-@pytest.mark.parametrize("requested,confirmed", [(False, None), (True, False), (False, True)])
+@pytest.mark.parametrize(
+    "requested,confirmed,acknowledge",
+    [(False, False, False), (True, False, True), (False, True, True), (False, None, True)],
+)
 async def test_audio_session_honors_barge_in_policy_and_keeps_listening(
-    service, conn_id, monkeypatch, capsys, requested, confirmed
+    service, conn_id, monkeypatch, capsys, requested, confirmed, acknowledge
 ):
     config = RealtimeAudioClientConfig(vad_threshold=0.8, interrupt_response=requested)
     update = build_session_update(config)
-    effective = requested if confirmed is None else confirmed
-    update["session"]["audio"]["input"]["turn_detection"]["interrupt_response"] = effective
+    update["session"]["audio"]["input"]["turn_detection"]["interrupt_response"] = confirmed
     assert service.handle_session_update(conn_id, SessionUpdateEvent.model_validate(update)) is None
     state = service._state(conn_id)
+    effective = state.runtime_config.interrupt_response_enabled
     assert state.runtime_config.session.audio.input.turn_detection.threshold == 0.8
     if not effective:
         service.response._ensure_response(conn_id)
     # A finished server response can still have audio queued on the client.
     pcm = b"\x01\x02" * 100
-    events = [] if confirmed is None else [service.build_session_updated(conn_id)]
+    events = [service.build_session_updated(conn_id)] if acknowledge else []
     events.append(SimpleNamespace(type="response.output_audio.delta", delta=base64.b64encode(pcm)))
     speech_events = service.dispatch_pipeline_event(conn_id, SpeechStartedEvent())
     assert state.in_response is not effective

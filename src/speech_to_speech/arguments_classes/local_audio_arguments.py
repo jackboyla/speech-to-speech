@@ -49,7 +49,7 @@ class LocalAudioArguments:
     local_audio_interrupt_response: bool = field(
         default=True,
         metadata={
-            "help": "Allow speech to interrupt assistant playback. Disabling this keeps microphone input enabled.",
+            "help": "Allow speech to interrupt assistant playback.",
             "aliases": ["--interrupt-response"],
         },
     )

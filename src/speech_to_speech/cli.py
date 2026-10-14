@@ -136,7 +136,7 @@ def parse_talk_arguments(argv: Sequence[str]) -> RealtimeAudioClientConfig:
         "--interrupt-response",
         action=argparse.BooleanOptionalAction,
         default=defaults.interrupt_response,
-        help="Allow speech to interrupt assistant playback. Disabling this keeps microphone input enabled.",
+        help="Allow speech to interrupt assistant playback.",
     )
     parser.add_argument("--input-device", type=int, default=defaults.input_device)
     parser.add_argument("--output-device", type=int, default=defaults.output_device)

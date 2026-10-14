@@ -975,9 +975,7 @@ async def _run_audio_session(
                 session = getattr(event, "session", None)
                 audio_input = getattr(getattr(session, "audio", None), "input", None)
                 turn_detection = getattr(audio_input, "turn_detection", None)
-                confirmed = getattr(turn_detection, "interrupt_response", None)
-                if confirmed is not None:
-                    interrupt_response = confirmed
+                interrupt_response = getattr(turn_detection, "interrupt_response", None) is not False
             tool_calls.handle_event(event)
             handle_server_event(
                 event,

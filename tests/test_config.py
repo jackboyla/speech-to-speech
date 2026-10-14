@@ -285,20 +285,17 @@ def test_error_context_and_long_numbers(tmp_path, document):
         resolve_config(document, environ={"COUNT": "1" * 5000})
 
 
-@pytest.mark.parametrize(
-    "key,value",
-    [
+def test_inactive_client_literal_validation_and_source(document):
+    for key, value in [
         ("playback_buffer_ms", -1),
         ("vad_threshold", -0.1),
         ("vad_threshold", 1.1),
         ("vad_threshold", float("nan")),
         ("vad_threshold", float("inf")),
-    ],
-)
-def test_inactive_client_literal_validation_and_source(document, key, value):
-    document.data["runtime"] = {"client": {key: value}}
-    with pytest.raises(ConfigurationError):
-        validate_config(document)
+    ]:
+        document.data["runtime"] = {"client": {key: value}}
+        with pytest.raises(ConfigurationError):
+            validate_config(document)
     document.data["runtime"]["client"] = {"tool_module": {"env": "TOOLS"}}
     result = resolve_config(document, include_client=True, environ={"TOOLS": "my_tools"})
     assert result.client["tool_module"] == "my_tools"
