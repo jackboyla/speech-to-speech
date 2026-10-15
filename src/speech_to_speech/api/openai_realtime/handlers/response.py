@@ -120,9 +120,12 @@ class ResponseHandler(RealtimeBaseHandler):
         self._service.total_usage += st.response_usage
         self._log_turn_latency(st, status, completed_response_key)
         logger.info(
-            "Response done (status=%s) — this response: input_tokens=%d, output_tokens=%d, audio=%.2fs"
+            "Response done (status=%s) response_id=%s response_key=%s"
+            " — this response: input_tokens=%d, output_tokens=%d, audio=%.2fs"
             " | cumulative: input_tokens=%d, output_tokens=%d, audio=%.2fs",
             status,
+            st.current_response_id,
+            completed_response_key,
             st.response_usage.input_tokens,
             st.response_usage.output_tokens,
             st.response_usage.audio_duration_s,

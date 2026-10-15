@@ -130,6 +130,19 @@ Cancellation retains `status: "cancelled"` with reason `"turn_detected"` or
 `"client_cancelled"`. A compatible provider that closes its stream without a
 terminal signal keeps the existing completion behavior and logs a warning.
 
+A successful provider completion with no output keeps `status: "completed"`
+and `output: []`. The `LLM completed without output` warning includes its
+`response_key`, model, provider status, Chat Completions `finish_reason`, text
+character count, tool-call count, and token usage. Tool-only responses do not
+trigger this warning. The `Response done` log maps `response_key` to the client's
+response ID.
+
+To inspect the effective instructions, history, and tool settings for a synthetic
+reproduction, use `--log_level debug --log_transcripts`. Match the `LLM request`
+and `LLM generation ended` or empty-completion log lines by `response_key`.
+The `LLM request` log redacts request content and tool definitions unless
+`--log_transcripts` is set.
+
 Run the provider status regression tests without a model server or GPU:
 
 ```bash

@@ -131,6 +131,31 @@ def test_llm_text_and_tool_arguments_follow_the_gate(caplog, enabled):
 
 
 @pytest.mark.parametrize("enabled", [False, True])
+def test_llm_request_diagnostics_follow_the_gate(caplog, enabled):
+    from tests.test_chat_completions_backend import _drive, _make_handler
+
+    logger_name = "speech_to_speech.LLM.base_openai_compatible_language_model"
+    caplog.set_level(logging.DEBUG, logger=logger_name)
+    set_log_transcripts(enabled)
+    _drive(
+        _make_handler(stream=False),
+        user=SENTINEL,
+        instructions=SENTINEL,
+        tools=[{"type": "function", "name": "remember", "description": TOOL_SENTINEL}],
+        tool_choice="auto",
+    )
+
+    requests = [record.getMessage() for record in caplog.records if record.getMessage().startswith("LLM request ")]
+    assert len(requests) == 1
+    _assert_content_visibility(requests[0], enabled, SENTINEL, TOOL_SENTINEL)
+    assert "response_key=" in requests[0]
+    assert "model=test-model" in requests[0]
+    if not enabled:
+        assert "input=chars=" in requests[0]
+        assert "options=chars=" in requests[0]
+
+
+@pytest.mark.parametrize("enabled", [False, True])
 def test_realtime_validation_errors_follow_the_gate(caplog, enabled):
     caplog.set_level(logging.DEBUG)
     raw = {

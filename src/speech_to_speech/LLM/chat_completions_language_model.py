@@ -202,10 +202,10 @@ def _tool_calls_from_accum(tool_accum: dict[int, dict[str, str]]) -> Iterator[To
 
 def _chat_response_end(finish_reason: str) -> ProviderResponseEnd:
     if finish_reason == "length":
-        return ProviderResponseEnd(status="incomplete", reason="max_output_tokens")
+        return ProviderResponseEnd(status="incomplete", reason="max_output_tokens", finish_reason=finish_reason)
     if finish_reason == "content_filter":
-        return ProviderResponseEnd(status="incomplete", reason="content_filter")
-    return ProviderResponseEnd()
+        return ProviderResponseEnd(status="incomplete", reason="content_filter", finish_reason=finish_reason)
+    return ProviderResponseEnd(finish_reason=finish_reason)
 
 
 def _iter_chat_stream_events(api_response: Stream[ChatCompletionChunk]) -> Iterator[ProviderEvent]:

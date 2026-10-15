@@ -17,6 +17,7 @@ the beta path expects the older ``response.audio.delta`` variants.
 import asyncio
 import base64
 import json
+import logging
 import socket
 import sys
 import threading
@@ -25,10 +26,11 @@ from queue import Empty, Queue
 from threading import Event as ThreadingEvent
 from types import SimpleNamespace
 
+import httpx
 import numpy as np
 import pytest
 import uvicorn
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAI
 from openai.types.realtime import RealtimeConversationItemFunctionCall
 
 import speech_to_speech.api.openai_realtime.audio_client as audio_client_module
@@ -63,6 +65,8 @@ from speech_to_speech.pipeline.messages import (
     TTSInput,
 )
 from speech_to_speech.pipeline.speculative_turns import SpeculativeTurnTracker
+from tests.test_chat_completions_backend import _make_handler as _chat_handler
+from tests.test_provider_response_status import _chat_chunk
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -180,6 +184,209 @@ OUTPUT_ITEM_DONE = "response.output_item.done"
 CONTENT_PART_ADDED = "response.content_part.added"
 CONTENT_PART_DONE = "response.content_part.done"
 ERROR = "error"
+
+
+@pytest.mark.parametrize("retry_text", ["Ready.", ""])
+async def test_tool_exchange_then_early_cancel_and_input_free_retry(server_env, retry_text, caplog):
+    """Use real SDK streams and pipeline workers; script only the provider and TTS."""
+    caplog.set_level(logging.INFO, logger="speech_to_speech.api.openai_realtime.handlers.response")
+    requests = []
+    cancelled_request_started = ThreadingEvent()
+    release_cancelled_request = ThreadingEvent()
+    spoken = []
+    tool = {
+        "type": "function",
+        "name": "canary_echo",
+        "parameters": {"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]},
+    }
+    instructions = "Reply in one short English sentence. Use canary_echo when asked."
+
+    def respond(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        prompt = body["messages"][0]["content"]
+        if "Count out loud" in prompt:
+            cancelled_request_started.set()
+            assert release_cancelled_request.wait(5)
+            chunks = [_chat_chunk("Old response must not reach the retry."), _chat_chunk(finish_reason="stop")]
+        elif body["tool_choice"] == "required":
+            chunks = [
+                _chat_chunk(
+                    tool_calls=[
+                        {
+                            "index": 0,
+                            "id": "provider_call",
+                            "type": "function",
+                            "function": {"name": "canary_echo", "arguments": '{"value":"seven"}'},
+                        }
+                    ]
+                ),
+                _chat_chunk(finish_reason="tool_calls"),
+            ]
+        else:
+            text = retry_text if "Say ready briefly" in prompt else "Seven." if len(requests) == 4 else "Ready."
+            chunks = [_chat_chunk(text), _chat_chunk(finish_reason="stop")]
+        chunks.append(_chat_chunk(usage={"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}))
+        payload = "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + "data: [DONE]\n\n"
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=payload)
+
+    class ScriptedTTS(BaseHandler):
+        def process(self, item):
+            if isinstance(item, TTSInput):
+                spoken.append(item.text)
+                yield _pcm_bytes(256)
+            elif isinstance(item, EndOfResponse):
+                yield AUDIO_RESPONSE_DONE
+
+    lm_outputs, tts_inputs = Queue(), Queue()
+    handler = _chat_handler()
+    handler.stop_event = server_env.stop_event
+    handler.queue_in = server_env.text_prompt_queue
+    handler.queue_out = lm_outputs
+    handler.cancel_scope = server_env.cancel_scope
+    processor = LMOutputProcessor(
+        server_env.stop_event, lm_outputs, tts_inputs, setup_kwargs={"text_output_queue": server_env.text_output_queue}
+    )
+    tts = ScriptedTTS(server_env.stop_event, tts_inputs, server_env.output_queue)
+    tts.cancel_scope = server_env.cancel_scope
+    workers = [threading.Thread(target=stage.run, daemon=True) for stage in (handler, processor, tts)]
+
+    async def receive_response(conn):
+        events = []
+        while not events or events[-1].type != RESPONSE_DONE:
+            events.append(await _recv(conn))
+            assert events[-1].type != ERROR
+        return events
+
+    with OpenAI(
+        api_key="test",
+        base_url="http://provider.invalid/v1",
+        http_client=httpx.Client(transport=httpx.MockTransport(respond)),
+    ) as provider:
+        handler.client = provider
+        for worker in workers:
+            worker.start()
+        try:
+            async with server_env.make_client() as client, client.realtime.connect(model="test") as conn:
+                assert (await _recv(conn)).type == SESSION_CREATED
+                await conn.session.update(
+                    session={"type": "realtime", "instructions": instructions, "tools": [tool], "tool_choice": "auto"}
+                )
+                assert (await _recv(conn)).type == "session.updated"
+
+                server_env.text_output_queue.put(SpeechStartedEvent())
+                server_env.text_output_queue.put(SpeechStoppedEvent())
+                server_env.text_output_queue.put(TranscriptionCompletedEvent(transcript="Hello. Can you hear me?"))
+                assert any(event.type == AUDIO_DELTA for event in await receive_response(conn))
+
+                await conn.response.create(response={"instructions": "Say ready in one short English sentence."})
+                assert any(event.type == AUDIO_DELTA for event in await receive_response(conn))
+                await conn.conversation.item.create(
+                    item={
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "Use canary_echo with seven, then say its result."}],
+                    }
+                )
+                assert (await _recv(conn)).type == ITEM_CREATED
+                await conn.response.create(response={"tool_choice": "required"})
+                tool_events = await receive_response(conn)
+                tool_response = tool_events[-1].response
+                assert tool_response.status == "completed"
+                assert [item.type for item in tool_response.output] == ["function_call"]
+                assert not any(event.type == AUDIO_DELTA for event in tool_events)
+                await conn.conversation.item.create(
+                    item={
+                        "type": "function_call_output",
+                        "call_id": tool_response.output[0].call_id,
+                        "output": '{"value":"seven","test":"passed"}',
+                    }
+                )
+                assert (await _recv(conn)).type == ITEM_CREATED
+                await conn.response.create()
+                assert any(event.type == AUDIO_DELTA for event in await receive_response(conn))
+                assert spoken[-1] == "Seven."
+                state = next(iter(server_env.service._conns.values()))
+                history_before_cancel = state.runtime_config.chat.to_transformers_chat()
+
+                await conn.response.create(response={"instructions": "Count out loud from one to one hundred."})
+                cancelled = await _recv(conn)
+                assert cancelled.type == RESPONSE_CREATED
+                assert await asyncio.to_thread(cancelled_request_started.wait, 2)
+                await conn.response.cancel()
+                terminal = await _recv(conn)
+                assert terminal.type == RESPONSE_DONE
+                assert terminal.response.id == cancelled.response.id
+                assert terminal.response.status == "cancelled"
+                assert terminal.response.output == []
+                assert state.runtime_config.chat.to_transformers_chat() == history_before_cancel
+                await conn.response.create(response={"instructions": "Say ready briefly in English."})
+                retry = await _recv(conn)
+                assert retry.type == RESPONSE_CREATED
+                assert retry.response.id != cancelled.response.id
+                retry_key = state.current_response_key
+                speech_before_retry = len(spoken)
+                release_cancelled_request.set()
+                retry_events = await receive_response(conn)
+                assert retry_events[-1].response.id == retry.response.id
+                assert retry_events[-1].response.status == "completed"
+                if retry_text:
+                    assert any(event.type == AUDIO_DELTA for event in retry_events)
+                    assert retry_events[-1].response.output[0].content[0].transcript == retry_text
+                    assert spoken[speech_before_retry:] == [retry_text]
+                else:
+                    assert [event.type for event in retry_events] == [RESPONSE_DONE]
+                    assert retry_events[-1].response.output == []
+                    assert spoken[speech_before_retry:] == []
+                    assert state.runtime_config.chat.to_transformers_chat() == history_before_cancel
+
+                assert len(requests) == 6
+                assert requests[-1]["messages"][1:] == requests[-2]["messages"][1:]
+                messages = requests[-1]["messages"]
+                assert [message["role"] for message in messages] == [
+                    "system",
+                    "user",
+                    "assistant",
+                    "assistant",
+                    "user",
+                    "assistant",
+                    "tool",
+                    "assistant",
+                ]
+                call = messages[-3]["tool_calls"][0]
+                assert call["id"] == messages[-2]["tool_call_id"] == tool_response.output[0].call_id
+                assert json.loads(call["function"]["arguments"]) == {"value": "seven"}
+                assert json.loads(messages[-2]["content"]) == {"value": "seven", "test": "passed"}
+                assert messages[-1]["content"] == "Seven."
+                assert "Say ready briefly in English." in requests[-1]["messages"][0]["content"]
+                assert "Count out loud" not in requests[-1]["messages"][0]["content"]
+                assert [request["tool_choice"] for request in requests] == [
+                    "auto",
+                    "auto",
+                    "required",
+                    "auto",
+                    "auto",
+                    "auto",
+                ]
+                assert all(
+                    request["tools"]
+                    == [{"type": "function", "function": {key: value for key, value in tool.items() if key != "type"}}]
+                    for request in requests
+                )
+                assert state.runtime_config.session.instructions == instructions
+                empty_logs = [record for record in caplog.records if "LLM completed without output" in record.message]
+                assert len(empty_logs) == (0 if retry_text else 1)
+                if not retry_text:
+                    assert f"response_key={retry_key}" in empty_logs[0].message
+                assert f"response_id={retry.response.id} response_key={retry_key}" in caplog.text
+        finally:
+            release_cancelled_request.set()
+            server_env.stop_event.set()
+            for queue in (server_env.text_prompt_queue, lm_outputs, tts_inputs):
+                queue.put(PIPELINE_END)
+            for worker in workers:
+                worker.join(timeout=3)
+                assert not worker.is_alive()
 
 
 # ===================================================================

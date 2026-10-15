@@ -121,6 +121,7 @@ class ProviderResponseEnd(BaseModel):
     status: Literal["completed", "incomplete", "failed"] = "completed"
     reason: ResponseIncompleteReason | None = None
     error: str | None = None
+    finish_reason: str | None = None
     # Responses output_index order, independent of item completion timing.
     history_item_order: list[str] | None = None
 
@@ -791,6 +792,14 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
                     error_message = "Cannot generate a response: no instructions and no input were provided."
                 else:
                     provider_request_started = True
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "LLM request response_key=%s model=%s input=%s options=%s",
+                            turn.response_key,
+                            self.model_name,
+                            transcript_for_log(api_input),
+                            transcript_for_log(optional_kwargs),
+                        )
 
                     def make_request() -> Any:
                         return (request_fn or self._request)(api_input, optional_kwargs)
@@ -841,6 +850,31 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
                 # the response on the service thread.
                 if tracker is not None and provider_request_started:
                     tracker.record_llm(perf_counter() - generation_started_at_s)
+
+            empty_completion = generation_completed and state.ending.status == "completed" and not state.output_emitted
+            if empty_completion or logger.isEnabledFor(logging.DEBUG):
+                logger.log(
+                    logging.WARNING if empty_completion else logging.DEBUG,
+                    "%s response_key=%s model=%s provider_status=%s finish_reason=%s"
+                    " generation_completed=%s provider_text_chars=%d tool_calls=%d output_emitted=%s"
+                    " input_tokens=%d output_tokens=%d",
+                    "LLM completed without output" if empty_completion else "LLM generation ended",
+                    turn.response_key,
+                    self.model_name,
+                    state.ending.status,
+                    state.ending.finish_reason,
+                    generation_completed,
+                    sum(
+                        len(part.text or "")
+                        for item in state.history_items
+                        if isinstance(item, RealtimeConversationItemAssistantMessage)
+                        for part in item.content
+                    ),
+                    len(state.tools),
+                    state.output_emitted,
+                    state.input_tokens,
+                    state.output_tokens,
+                )
 
             if (
                 provider_request_started

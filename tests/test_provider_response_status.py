@@ -1,6 +1,7 @@
 """Exercise provider terminal signals through the SDK, pipeline, and Realtime service."""
 
 import json
+import logging
 from queue import Queue
 from threading import Event
 
@@ -178,7 +179,8 @@ CASES = [
 @pytest.mark.parametrize("backend,signal,status,reason", CASES)
 @pytest.mark.parametrize("stream", [True, False])
 @pytest.mark.parametrize("modality", ["text", "audio"])
-def test_provider_ending_reaches_realtime(backend, signal, status, reason, stream, modality):
+def test_provider_ending_reaches_realtime(backend, signal, status, reason, stream, modality, caplog):
+    caplog.set_level(logging.DEBUG, logger="speech_to_speech.LLM.base_openai_compatible_language_model")
     response, outputs, events, request, logical_done = _run(backend, stream, signal, modality)
     assert response.status == status
     assert response.status_details.reason == reason
@@ -193,6 +195,9 @@ def test_provider_ending_reaches_realtime(backend, signal, status, reason, strea
     assert any(item.get("role") == "assistant" for item in history) == (status == "completed")
     assert any(item.get("role") == "user" for item in history)
     assert all(item.status == ("completed" if status == "completed" else "incomplete") for item in response.output)
+    if backend == "chat":
+        assert f"finish_reason={signal}" in caplog.text
+    assert "LLM completed without output" not in caplog.text
 
 
 @pytest.mark.parametrize("modality", ["text", "audio"])
@@ -308,7 +313,7 @@ def test_direct_audio_uses_chat_completion_status(backend, stream):
     "backend,signal",
     [("chat", "length"), ("responses", "max_output_tokens"), ("responses", "failed"), ("responses", "error")],
 )
-def test_cancelled_generation_ignores_provider_terminal(backend, signal):
+def test_cancelled_generation_ignores_provider_terminal(backend, signal, caplog):
     from speech_to_speech.pipeline.cancel_scope import CancelScope
 
     scope = CancelScope()
@@ -339,6 +344,7 @@ def test_cancelled_generation_ignores_provider_terminal(backend, signal):
     assert end.reason is None
     assert end.status == "completed"  # The router owns cancellation; no provider override.
     assert not any(item.get("role") == "assistant" for item in request.runtime_config.chat.to_responses_api_chat())
+    assert "LLM completed without output" not in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -489,7 +495,28 @@ def test_successful_empty_provider_output_completes(backend, stream, kind, modal
     assert not any(event.type == "error" or event.type.startswith("response.output_") for event in events)
     assert [event.type for event in events].count("response.created") == 1
     assert any(item.get("role") == "user" for item in request.runtime_config.chat.to_responses_api_chat())
+    assert "LLM completed without output" in caplog.text
+    assert f"response_key={request.response_key}" in caplog.text
+    assert "provider_text_chars=0" in caplog.text
+    assert "tool_calls=0" in caplog.text
+    if backend == "chat":
+        assert f"finish_reason={'stop' if kind == 'empty_stop' else None}" in caplog.text
     if stream and kind in ("no_events", "usage_only", "created_only"):
         assert "ended without" in caplog.text
     else:
         assert "ended without" not in caplog.text
+
+
+@pytest.mark.parametrize("stream", [True, False])
+def test_whitespace_only_provider_output_is_distinguishable_from_empty(stream, caplog):
+    payload = (
+        [_chat_chunk(" \n "), _chat_chunk(finish_reason="stop")] if stream else _provider_payload("chat", False, "stop")
+    )
+    if not stream:
+        payload["choices"][0]["message"]["content"] = " \n "
+    response, _, _, _, _ = _run("chat", stream, "stop", "audio", payload)
+
+    assert response.status == "completed"
+    assert response.output == []
+    assert "LLM completed without output" in caplog.text
+    assert "provider_text_chars=3" in caplog.text
