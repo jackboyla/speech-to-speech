@@ -1,7 +1,7 @@
 param(
     [switch]$NoAudio,
     [string]$Root = "",
-    [string]$BundleRevision = "BUNDLE_REVISION"
+    [string]$BundleRevision = "0e11b012d3cf3c62622af8d4f81e44a897029a1f"
 )
 
 $ErrorActionPreference = "Stop"
