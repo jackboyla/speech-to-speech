@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 if (-not [Environment]::Is64BitOperatingSystem) {
     throw "This check needs 64-bit Windows."
@@ -73,6 +74,10 @@ try {
 } finally {
     Stop-Transcript | Out-Null
     Write-Host "Results: $run"
-    if (-not $NoAudio) { Start-Process explorer.exe -ArgumentList ('"' + $run + '"') }
+    $resultZip = $run + '.zip'
+    Compress-Archive -Path (Join-Path $run '*') -DestinationPath $resultZip
+    if (-not $NoAudio) {
+        Start-Process explorer.exe -ArgumentList ('/select,"' + $resultZip + '"')
+    }
 }
 if ($exitCode -ne 0) { throw "Windows check failed. Keep the results folder for diagnosis: $run" }

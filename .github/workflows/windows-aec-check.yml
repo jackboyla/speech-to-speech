@@ -19,6 +19,11 @@ jobs:
           AEC_BUNDLE_REVISION: ${{ github.sha }}
         run: |
           & ./scripts/windows-aec-check.ps1 -NoAudio -Root "$env:RUNNER_TEMP/AEC check"
+      - name: Download the command and rerun in the same folder
+        shell: powershell
+        run: |
+          $url = "https://raw.githubusercontent.com/jackboyla/speech-to-speech/$env:GITHUB_SHA/scripts/windows-aec-check.ps1"
+          & ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing $url).Content)) -NoAudio -Root "$env:RUNNER_TEMP/AEC check"
       - name: Keep test results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

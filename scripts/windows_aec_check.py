@@ -169,6 +169,8 @@ def main() -> int:
         if args.no_audio:
             print("Hosted check finished. Physical mic/speaker testing was skipped.", flush=True)
         else:
+            print(f"Microphone: {sd.query_devices(kind='input')['name']}", flush=True)
+            print(f"Speakers: {sd.query_devices(kind='output')['name']}", flush=True)
             physical_check(args.results, report)
             report["physical_audio_tested"] = True
     except (Exception, KeyboardInterrupt) as exc:
