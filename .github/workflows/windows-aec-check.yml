@@ -1,0 +1,27 @@
+name: Windows AEC check
+
+on:
+  push:
+    branches: [test/windows-aec-check]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-client:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Run the laptop bootstrap using Windows PowerShell 5.1
+        shell: powershell
+        env:
+          AEC_BUNDLE_REVISION: ${{ github.sha }}
+        run: |
+          & ./scripts/windows-aec-check.ps1 -NoAudio -Root "$env:RUNNER_TEMP/AEC check"
+      - name: Keep test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-aec-check
+          path: ${{ runner.temp }}/AEC check/results
