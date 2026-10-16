@@ -1128,11 +1128,11 @@ class _AudioWorker:
         while self._process.is_alive():
             await asyncio.sleep(0.1)
         message = "Audio process stopped unexpectedly"
-        if self._errors.poll():
-            try:
+        try:
+            if self._errors.poll():
                 message = self._errors.recv()
-            except EOFError:
-                pass
+        except (EOFError, OSError):
+            pass
         logger.error("Local audio process failed: %s", message)
         raise RuntimeError(message)
 

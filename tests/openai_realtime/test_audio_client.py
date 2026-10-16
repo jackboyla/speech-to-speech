@@ -1651,8 +1651,9 @@ async def test_audio_worker_reports_startup_failure_and_exits():
     config = RealtimeAudioClientConfig(echo_cancellation=True, input_device=-9999)
     worker = audio_client_module._AudioWorker(config)
     with worker:
-        with pytest.raises(RuntimeError):
-            await asyncio.wait_for(worker.wait_for_failure(), timeout=15)
+        for _ in range(2):
+            with pytest.raises(RuntimeError):
+                await asyncio.wait_for(worker.wait_for_failure(), timeout=15)
     assert not worker._process.is_alive()
 
 

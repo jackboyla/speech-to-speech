@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib.metadata
 import json
 import logging
@@ -47,8 +48,7 @@ def record_phase(results: Path, name: str, *, aec: bool, played: np.ndarray) -> 
         ready_deadline = time.monotonic() + 20
         while True:
             if worker and not worker._process.is_alive():
-                message = worker._errors.recv() if worker._errors.poll() else "Audio worker exited"
-                raise RuntimeError(message)
+                asyncio.run(worker.wait_for_failure())
             try:
                 queue.get(timeout=0.1)
                 break
@@ -62,8 +62,7 @@ def record_phase(results: Path, name: str, *, aec: bool, played: np.ndarray) -> 
         deadline = time.monotonic() + duration
         while time.monotonic() < deadline:
             if worker and not worker._process.is_alive():
-                message = worker._errors.recv() if worker._errors.poll() else "Audio worker exited"
-                raise RuntimeError(message)
+                asyncio.run(worker.wait_for_failure())
             try:
                 captured.extend(queue.get(timeout=0.1))
             except Empty:
@@ -149,7 +148,8 @@ def main() -> int:
         handlers=[logging.FileHandler(args.results / "audio.log", encoding="utf-8"), logging.StreamHandler()],
     )
     report = {
-        "source_revision": SOURCE_REVISION,
+        "source_base_revision": SOURCE_REVISION,
+        "source_patch": "Treat closed Windows error pipes as worker failure, including repeated failure observers.",
         "bundle_revision": os.environ.get("AEC_BUNDLE_REVISION"),
         "platform": platform.platform(),
         "python": sys.version,
