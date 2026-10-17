@@ -948,3 +948,45 @@ def test_pocket_farsi_model_cli_routes_to_setup():
     assert args.tts_backend.config["voice"] == "/voices/farsi.wav"
     assert args.tts_backend.config["temperature"] == 0.3
     assert args.tts_backend.config["eos_threshold"] == -2.0
+
+
+def test_tyger_selection_owns_turns_and_rejects_incompatible_local_options():
+    args = parse_arguments(["--stt", "tyger", "--tyger_endpoint_threshold", "0.93", "--tyger_device", "cuda:1"])
+    prepare_all_args(args)
+    assert args.stt_backend.spec.capabilities.owns_turn_detection
+    assert args.stt_backend.config["endpoint_threshold"] == 0.93
+    assert args.stt_backend.config["device"] == "cuda:1"
+    assert s2s_pipeline._stt_session_languages(args.stt_backend, SimpleNamespace()) == {"en"}
+    with pytest.raises(ValueError, match="browser WebSocket"):
+        s2s_pipeline.build_local_pipeline(args, Event())
+    args.module_kwargs.diarization_model_name = "test-model"
+    with pytest.raises(ValueError, match="diarization"):
+        prepare_all_args(args)
+
+
+def test_tyger_pipeline_skips_vad_and_preserves_threads_setting(monkeypatch):
+    args = parse_arguments(["--stt", "tyger", "--tts", "openai", "--torch_num_threads", "3"])
+    threads = []
+    created = []
+
+    def factory(selection, context):
+        handler = SimpleNamespace()
+        created.append((selection, context, handler))
+        return handler
+
+    monkeypatch.setattr(s2s_pipeline, "VADHandler", lambda *args, **kwargs: pytest.fail("Tyger must bypass VAD"))
+    monkeypatch.setattr(s2s_pipeline, "create_backend_handler", factory)
+    monkeypatch.setattr(s2s_pipeline.torch, "set_num_threads", threads.append)
+    unit = s2s_pipeline._build_pipeline_unit(
+        index=0,
+        stop_event=Event(),
+        module_kwargs=args.module_kwargs,
+        vad_handler_kwargs=args.vad_handler_kwargs,
+        stt_backend=args.stt_backend,
+        llm_backend=args.llm_backend,
+        tts_backend=args.tts_backend,
+    )
+    assert threads == [3]
+    assert unit.handlers[0] is created[0][2]
+    assert created[0][1].queue_in is unit.input_queue
+    assert unit.service.requires_playback_reference

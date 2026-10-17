@@ -2156,3 +2156,40 @@ def test_cancellation_while_visemes_send_does_not_restart_audio(setup, monkeypat
             time.sleep(0.1)
             assert audio_sends == []
             assert not service._state(conn_id).in_response
+
+
+def test_tyger_websocket_requires_aligned_reference_without_advancing_invalid_audio(setup):
+    from speech_to_speech.pipeline.messages import DuplexAudio
+
+    app, service, input_queue, *_ = setup
+    service.requires_playback_reference = True
+    audio = np.full(960, 1000, dtype="<i2").tobytes()
+    with TestClient(app) as client:
+        with client.websocket_connect("/v1/realtime") as ws:
+            created = ws.receive_json()
+            assert created["session"]["speech_to_speech"]["input_audio_reference"] is True
+            base = {"type": "input_audio_buffer.append", "audio": base64.b64encode(audio).decode()}
+            ws.send_json(base)
+            assert ws.receive_json()["error"]["type"] == "invalid_audio_reference"
+            assert input_queue.empty()
+            ws.send_json({**base, "playback_audio": "AA==", "playback_active": True})
+            assert ws.receive_json()["error"]["type"] == "invalid_audio_reference"
+            assert input_queue.empty()
+            for _ in range(4):
+                ws.send_json({**base, "playback_audio": base["audio"], "playback_active": True})
+            chunks = [input_queue.get(timeout=1) for _ in range(4)]
+            assert all(
+                isinstance(chunk, DuplexAudio) and chunk.audio == chunk.playback and chunk.playback_active
+                for chunk in chunks
+            )
+            pcm = b"".join(chunk.audio for chunk in chunks)
+            # Same stream as one append: paired resampling has no chunk-boundary skew.
+            from speech_to_speech.api.openai_realtime.utils import StreamingPcm16Resampler
+
+            assert pcm == StreamingPcm16Resampler(24000, 16000).push(audio * 4)
+            ws.send_json({"type": "input_audio_buffer.commit"})
+            assert ws.receive_json()["error"]["type"] == "invalid_request_error"
+        assert (
+            client.post("/v1/realtime/calls", content="v=0", headers={"Content-Type": "application/sdp"}).status_code
+            == 400
+        )

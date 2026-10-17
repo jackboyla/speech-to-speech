@@ -50,6 +50,7 @@ from speech_to_speech.arguments_classes.responses_api_language_model_arguments i
 )
 from speech_to_speech.arguments_classes.sense_voice_stt_arguments import SenseVoiceSTTHandlerArguments
 from speech_to_speech.arguments_classes.supertonic_tts_arguments import SupertonicTTSHandlerArguments
+from speech_to_speech.arguments_classes.tyger_arguments import TygerArguments
 from speech_to_speech.arguments_classes.vllm_realtime_stt_arguments import VLLMRealtimeSTTHandlerArguments
 from speech_to_speech.arguments_classes.whisper_stt_arguments import WhisperSTTHandlerArguments
 from speech_to_speech.pipeline.cancel_scope import CancelScope
@@ -74,6 +75,7 @@ class BackendCapabilities:
     supports_audio_input: bool = False
     supports_llm_proxy: bool = False
     streams_audio_chunks: bool = False
+    owns_turn_detection: bool = False
 
 
 @dataclass(frozen=True)
@@ -160,6 +162,23 @@ def normalize_dataclass_config(config: Any, prefix: str | None = None) -> Backen
 
     normalized["gen_kwargs"] = generation
     return normalized
+
+
+def _create_tyger(context: HandlerContext, config: Mapping[str, Any]) -> Any:
+    from speech_to_speech.STT.tyger_handler import TygerInputHandler
+
+    return TygerInputHandler(
+        context.stop_event,
+        queue_in=context.queue_in,
+        queue_out=context.queue_out,
+        setup_kwargs={
+            **config,
+            "text_output_queue": context.text_output_queue,
+            "speculative_turns": context.speculative_turns,
+            "enable_live_transcription": context.enable_live_transcription,
+            "live_transcription_update_interval": context.live_transcription_update_interval,
+        },
+    )
 
 
 def _normalize_facebook_mms_config(config: Any) -> BackendConfig:
@@ -420,6 +439,14 @@ STT_BACKENDS = build_backend_registry(
             ),
             config_prefix="parakeet_unified",
             required_extra="nemo",
+        ),
+        BackendSpec(
+            "tyger",
+            "stt",
+            TygerArguments,
+            _create_tyger,
+            config_prefix="tyger",
+            capabilities=BackendCapabilities(owns_turn_detection=True),
         ),
         BackendSpec(
             "nemotron-streaming",

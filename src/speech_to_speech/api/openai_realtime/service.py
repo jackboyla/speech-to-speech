@@ -360,6 +360,8 @@ class RealtimeService:
     state is keyed by connection id.
     """
 
+    requires_playback_reference: bool = False
+
     def __init__(
         self,
         text_prompt_queue: Queue[TextPromptItem] | None = None,

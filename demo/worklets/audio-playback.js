@@ -41,11 +41,16 @@ class AudioPlaybackProcessor extends AudioWorkletProcessor {
     this._fadeIn = 0;
     this._fadeOut = 0;
     this._lastSample = 0;
+    this._responseActive = false;
+    this._renderStarted = false;
 
     this.port.onmessage = (e) => {
       const data = e.data;
       if (!data || typeof data !== "object") return;
       switch (data.kind) {
+        case "response":
+          this._responseActive = !!data.active;
+          break;
         case "config":
           if (typeof data.inputRate === "number" && data.inputRate > 0) {
             this._inputRate = data.inputRate;
@@ -65,6 +70,8 @@ class AudioPlaybackProcessor extends AudioWorkletProcessor {
           }
           break;
         case "clear":
+          this._responseActive = false;
+          this._renderStarted = false;
           if (data.clearId !== undefined) {
             this.port.postMessage({ kind: "cleared", clearId: data.clearId, played: [...this._playedByItem] });
           }
@@ -127,6 +134,7 @@ class AudioPlaybackProcessor extends AudioWorkletProcessor {
     if (!channels || channels.length === 0) return true;
     const out = channels[0];
     const stereo = channels.length > 1 ? channels[1] : null;
+    const reference = outputs[1];
 
     for (let i = 0; i < out.length; i++) {
       let sample = 0;
@@ -143,6 +151,7 @@ class AudioPlaybackProcessor extends AudioWorkletProcessor {
             this.port.postMessage({ kind: "underrun" });
           }
         } else {
+          this._renderStarted = true;
           sample = v;
           this._lastSample = v;
           this._advance();
@@ -168,6 +177,12 @@ class AudioPlaybackProcessor extends AudioWorkletProcessor {
 
       out[i] = sample;
       if (stereo) stereo[i] = sample;
+      if (reference?.[0]) reference[0][i] = sample;
+      if (reference?.[1]) {
+        // Keep the speaking mode through sentence pauses and buffered tails.
+        reference[1][i] = this._renderStarted && (this._responseActive || this._queue.length > 0 || this._playing) ? 1 : 0;
+      }
+      if (!this._responseActive && !this._queue.length && !this._playing) this._renderStarted = false;
     }
 
     this._framesSinceStats += out.length;

@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from speech_to_speech.api.openai_realtime.duplex_audio import DuplexAudioDecoder
 from speech_to_speech.api.openai_realtime.service import RealtimeService
 from speech_to_speech.api.openai_realtime.transports import SessionTransport
 from speech_to_speech.pipeline.cancel_scope import CancelScope
@@ -31,6 +32,7 @@ class SessionState(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    duplex_decoder: DuplexAudioDecoder | None = None
     transport: Optional[SessionTransport] = None
     session_id: str = ""
     pending_output_item: Any = None

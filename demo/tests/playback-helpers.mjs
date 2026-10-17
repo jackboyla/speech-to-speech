@@ -16,11 +16,13 @@ export function worklet(onMessage = () => {}, sampleRate = 48_000) {
   return {
     reports,
     send(message) { processor.port.onmessage({ data: message }); },
-    render(frames) {
+    render(frames, onReference) {
       const result = [];
       while (frames > 0) {
         const block = new Float32Array(Math.min(128, frames));
-        processor.process([], [[block]]);
+        const reference = [new Float32Array(block.length), new Float32Array(block.length)];
+        processor.process([], [[block], reference]);
+        onReference?.(...reference);
         result.push(...block);
         frames -= block.length;
       }

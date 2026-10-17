@@ -235,3 +235,70 @@ test("the pinned SDK forwards viseme extension events to avatar consumers", asyn
   assert.equal(detail?.response_id, "a");
   assert.deepEqual(detail?.visemes, [{ viseme: 21, start_s: 0, end_s: 0.1 }]);
 });
+
+test("Tyger capability survives SDK parsing and sends aligned playback while muted", async (t) => {
+  const f = await fixture(0);
+  t.after(() => f.client.close());
+  f.receive({ type: "session.created", session: {
+    id: "session-test", object: "realtime.session", model: "s2s-local",
+    speech_to_speech: { input_audio_reference: true },
+    audio: { input: { format: { type: "audio/pcm", rate: 24000 }, turn_detection: { type: "server_vad" } },
+      output: { format: { type: "audio/pcm", rate: 24000 } } },
+  } });
+  assert.equal(f.client._duplexInput, true);
+  f.client._status = "connected";
+  const audio = new Int16Array(960).fill(1000).buffer;
+  const playback = new Int16Array(960).fill(2000).buffer;
+  f.client._onMicChunk(audio, playback, true);
+  f.client._muted = true;
+  f.client._onMicChunk(audio, playback, true);
+  const [normal, muted] = f.sent.filter((event) => event.type === "input_audio_buffer.append");
+  assert.equal(normal.audio, Buffer.from(audio).toString("base64"));
+  assert.equal(normal.playback_audio, Buffer.from(playback).toString("base64"));
+  assert.equal(muted.audio, Buffer.alloc(audio.byteLength).toString("base64"));
+  assert.equal(muted.playback_audio, normal.playback_audio);
+  assert.equal(muted.playback_active, true);
+});
+
+
+test("rendered reference preserves speaking mode through underruns and buffered tails", () => {
+  const output = worklet();
+  output.send({ kind: "response", active: true });
+  let activity = [];
+  output.render(128, (_pcm, active) => activity.push(...active));
+  assert.ok(activity.every((value) => value === 0));
+  output.send({ kind: "audio", samples: new Float32Array(2400).fill(0.5), key: "a" });
+  const reference = [];
+  const rendered = output.render(12000, (pcm, active) => { reference.push(...pcm); activity.push(...active); });
+  assert.deepEqual(reference, rendered);
+  assert.equal(activity.at(-1), 1); // generation is still active after an underrun.
+  output.send({ kind: "audio", samples: new Float32Array(4800).fill(0.5), key: "a" });
+  output.send({ kind: "response", active: false });
+  output.render(128, (_pcm, active) => assert.equal(active[0], 1)); // buffered tail.
+  output.render(16000, (_pcm, active) => { activity = [...active]; });
+  assert.equal(activity.at(-1), 0);
+  output.send({ kind: "clear" });
+  output.render(128, (_pcm, active) => assert.ok(active.every((value) => value === 0)));
+});
+
+test("Tyger still reports user speech when interruption is disabled without clearing playback", async (t) => {
+  const f = await fixture(0);
+  t.after(() => f.client.close());
+  f.receive({ type: "session.created", session: {
+    id: "session-test", object: "realtime.session", model: "s2s-local",
+    speech_to_speech: { input_audio_reference: true },
+    audio: { input: { turn_detection: { type: "server_vad", interrupt_response: false } },
+      output: { format: { type: "audio/pcm", rate: 24000 } } },
+  } });
+  f.start();
+  f.audio(24000);
+  f.output.render(128);
+  f.interrupt();
+  f.acknowledge();
+  assert.deepEqual(f.truncations(), []);
+  assert.equal(f.sent.filter((event) => event.type === "response.cancel").length, 0);
+  assert.ok(f.output.render(128).some((value) => value > 0));
+  f.interrupt(true); // explicit user cancellation must still work.
+  f.acknowledge();
+  assert.equal(f.sent.filter((event) => event.type === "response.cancel").length, 1);
+});

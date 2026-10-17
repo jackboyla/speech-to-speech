@@ -39,6 +39,11 @@ class SessionHandler(RealtimeBaseHandler):
                 _type="invalid_session_type",
             )
 
+        if self._service.requires_playback_reference and s.audio is not None and s.audio.input is not None:
+            inp = s.audio.input
+            if "turn_detection" in inp.model_fields_set and inp.turn_detection is None:
+                return self.make_error("Tyger requires automatic turn detection.", "invalid_request_error")
+
         transcription = s.audio.input.transcription if s.audio is not None and s.audio.input is not None else None
         if transcription is not None and isinstance(transcription.language, str):
             language = transcription.language.strip()
@@ -82,7 +87,10 @@ class SessionHandler(RealtimeBaseHandler):
         # The OpenAI GA protocol includes the session id in session.created.
         # The SDK model has no `id` field but allows extras, and model_dump()
         # carries them onto the wire.
-        session = cfg.session.model_copy(update={"id": conn_id})
+        extra: dict[str, object] = {"id": conn_id}
+        if self._service.requires_playback_reference:
+            extra["speech_to_speech"] = {"input_audio_reference": True}
+        session = cfg.session.model_copy(update=extra)
         return SessionCreatedEvent(
             type="session.created",
             event_id=self._next_event_id(),

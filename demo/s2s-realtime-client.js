@@ -51,7 +51,7 @@ import { OrbVisualiser, VIS_FFT_SIZE } from "./ws/orb-visualizer.js";
 import { SentAudioRecorder } from "./ws/user-audio-recorder.js";
 
 export const AUDIO_SAMPLE_RATE = 24_000;
-export const AUDIO_WORKLET_VERSION = "audio-24k-v2";
+export const AUDIO_WORKLET_VERSION = "audio-duplex-v3";
 export const DEFAULT_PLAYBACK_BUFFER_MS = 0;
 const MIC_CHUNK_MS = 40;
 const CAPTURE_CONFIG_TIMEOUT_MS = 2_000;
@@ -106,6 +106,9 @@ export class S2sRealtimeClient extends EventTarget {
     this._muted = false;
     this._session = null;
     this._transport = null;
+    this._duplexInput = false;
+    this._interruptResponse = true;
+    this._skipNextSdkInterrupt = false;
     this._agent = null;
     this._queueId = "";
     this._queueWake = null;
@@ -190,8 +193,13 @@ export class S2sRealtimeClient extends EventTarget {
     if (this.options.transport === "websocket") {
       // The SDK clock starts at receipt and forgets the item on audio.done.
       // Our browser queue owns the actual playout position instead.
+      const owner = this;
       this._transport = new class extends OpenAIRealtimeWebSocket {
         interrupt(cancelOngoingResponse = true) {
+          if (owner._skipNextSdkInterrupt) {
+            owner._skipNextSdkInterrupt = false;
+            return;
+          }
           if (cancelOngoingResponse) this._cancelResponse();
           this.emit("audio_interrupted");
         }
@@ -315,7 +323,7 @@ export class S2sRealtimeClient extends EventTarget {
       await ctx.audioWorklet.addModule(versionedAudioWorkletUrl("mic-capture.js", base));
       await ctx.audioWorklet.addModule(versionedAudioWorkletUrl("audio-playback.js", base));
       const capture = new AudioWorkletNode(ctx, "mic-capture", {
-        numberOfInputs: 1,
+        numberOfInputs: 2,
         numberOfOutputs: 0,
         processorOptions: {
           chunkMs: MIC_CHUNK_MS,
@@ -333,6 +341,8 @@ export class S2sRealtimeClient extends EventTarget {
         capture.port.onmessage = (event) => {
           if (event.data instanceof ArrayBuffer) {
             this._onMicChunk(event.data);
+          } else if (event.data?.kind === "duplex") {
+            this._onMicChunk(event.data.audio, event.data.playback, event.data.active);
           } else if (event.data?.kind === "level") {
             this.dispatchEvent(new CustomEvent("input-level", { detail: { rms: event.data.rms } }));
           } else if (event.data?.kind === "capture-config") {
@@ -354,6 +364,7 @@ export class S2sRealtimeClient extends EventTarget {
           }
         };
       });
+      capture.port.postMessage({ kind: "duplex", enabled: this._duplexInput });
       capture.port.postMessage({ kind: "probe" });
       capture.port.postMessage({ kind: "gate", ...this._noiseGate });
       micSrc.connect(capture);
@@ -362,8 +373,8 @@ export class S2sRealtimeClient extends EventTarget {
 
       const playback = new AudioWorkletNode(ctx, "audio-playback", {
         numberOfInputs: 0,
-        numberOfOutputs: 1,
-        outputChannelCount: [1],
+        numberOfOutputs: 2,
+        outputChannelCount: [1, 2],
       });
       playback.port.onmessage = (event) => this._onPlaybackMessage(event.data);
       playback.port.postMessage({ kind: "config", inputRate: AUDIO_SAMPLE_RATE });
@@ -371,6 +382,7 @@ export class S2sRealtimeClient extends EventTarget {
       output.fftSize = VIS_FFT_SIZE;
       output.smoothingTimeConstant = 0.3;
       playback.connect(output);
+      playback.connect(capture, 1, 1);
       output.connect(ctx.destination);
       this._playbackNode = playback;
       this._outAnalyser = output;
@@ -528,9 +540,22 @@ export class S2sRealtimeClient extends EventTarget {
   }
 
   /** @param {ArrayBuffer} buffer */
-  _onMicChunk(buffer) {
-    if (!this._session || this._muted || this._status === "connecting") return;
-    this._session.sendAudio(buffer);
+  _onMicChunk(buffer, playback, active = false) {
+    if (!this._session || (!this._duplexInput && this._muted) || this._status === "connecting") return;
+    if (this._duplexInput) {
+      // Send paired buffers in one event so network scheduling cannot skew them.
+      if (!(playback instanceof ArrayBuffer)) return;
+      if (this._muted) buffer = new ArrayBuffer(buffer.byteLength);
+      const encode = (value) => {
+        let binary = "";
+        for (const byte of new Uint8Array(value)) binary += String.fromCharCode(byte);
+        return btoa(binary);
+      };
+      this._transport?.sendEvent({
+        type: "input_audio_buffer.append", audio: encode(buffer),
+        playback_audio: encode(playback), playback_active: active,
+      });
+    } else this._session.sendAudio(buffer);
     this._userAudioRecorder.append(buffer);
   }
 
@@ -541,6 +566,15 @@ export class S2sRealtimeClient extends EventTarget {
     if (typeof type !== "string") return;
     if (this._debug) console.debug(`[${this.options.transport}]`, event);
     switch (type) {
+      case "session.created":
+      case "session.updated": {
+        if (type === "session.created") {
+          this._duplexInput = event.session?.speech_to_speech?.input_audio_reference === true;
+          this._captureNode?.port.postMessage({ kind: "duplex", enabled: this._duplexInput });
+        }
+        this._interruptResponse = event.session?.audio?.input?.turn_detection?.interrupt_response !== false;
+        break;
+      }
       case "speech_to_speech.output_audio.visemes": {
         this.dispatchEvent(new CustomEvent("visemes", { detail: event }));
         break;
@@ -557,6 +591,8 @@ export class S2sRealtimeClient extends EventTarget {
         break;
       }
       case "input_audio_buffer.speech_started": {
+        // The SDK calls interrupt() immediately after dispatching this event.
+        this._skipNextSdkInterrupt = this._duplexInput && !this._interruptResponse;
         // WebSocket calls interrupt() after dispatching this raw event.
         if (this.options.transport !== "websocket") this._clearPlayback();
         const itemId = typeof event.item_id === "string" ? event.item_id : "";
@@ -585,6 +621,7 @@ export class S2sRealtimeClient extends EventTarget {
         break;
       }
       case "response.created":
+        if (this._duplexInput) this._playbackNode?.port.postMessage({ kind: "response", active: true });
         this._responseRequested = false;
         this._activeResponseId = event.response?.id ?? "";
         if (this.options.transport === "websocket") this._resetPlaybackBuffer(this._activeResponseId);
@@ -691,6 +728,7 @@ export class S2sRealtimeClient extends EventTarget {
         break;
       }
       case "response.done": {
+        if (this._duplexInput) this._playbackNode?.port.postMessage({ kind: "response", active: false });
         const responseId = event.response?.id ?? "";
         if (this.options.transport === "websocket") {
           this._finishPlayback(responseId, event.response?.status ?? "completed");

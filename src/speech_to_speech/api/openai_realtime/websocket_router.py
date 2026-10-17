@@ -21,6 +21,7 @@ from openai.types.realtime import (
     SessionUpdateEvent,
 )
 
+from speech_to_speech.api.openai_realtime.duplex_audio import DuplexAudioDecoder
 from speech_to_speech.api.openai_realtime.llm_proxy import LLMProxyConfig, mount_llm_proxy
 from speech_to_speech.api.openai_realtime.pipeline_unit import PipelineUnit, SessionState
 from speech_to_speech.api.openai_realtime.service import (
@@ -429,12 +430,43 @@ async def _dispatch_client_event(
                 ]
             )
             return
+        if service.requires_playback_reference:
+            assert unit.session is not None
+            config = service._state(session_id).runtime_config
+            assert config.session.audio is not None and config.session.audio.input is not None
+            audio_input = config.session.audio.input
+            if audio_input.format is not None and audio_input.format.type != "audio/pcm":
+                await send_correlated(
+                    [service.make_error("Tyger requires PCM16 input audio.", "invalid_audio_reference")]
+                )
+                return
+            source_rate = getattr(audio_input.format, "rate", None) or 24000
+            try:
+                if unit.session.duplex_decoder is None:
+                    unit.session.duplex_decoder = DuplexAudioDecoder(source_rate)
+                if source_rate != unit.session.duplex_decoder.source_rate:
+                    raise ValueError("Tyger input sample rate cannot change during a connection.")
+                audio = unit.session.duplex_decoder.append(raw, config)
+            except ValueError as exc:
+                await send_correlated([service.make_error(str(exc), "invalid_audio_reference")])
+                return
+            unit.input_queue.put(audio)
+            return
         chunks = service.handle_audio_append(session_id, event)
         rt_cfg = service._state(session_id).runtime_config
         for chunk in chunks:
             unit.input_queue.put((chunk, rt_cfg))
 
     elif isinstance(event, InputAudioBufferCommitEvent):
+        if service.requires_playback_reference:
+            await send_correlated(
+                [
+                    service.make_error(
+                        "Tyger commits turns automatically; manual commit is unsupported.", "invalid_request_error"
+                    )
+                ]
+            )
+            return
         chunks, err = service.handle_audio_commit(session_id)
         rt_cfg = service._state(session_id).runtime_config
         for chunk in chunks:
@@ -694,6 +726,10 @@ def create_app(
                 content="Content-Type must be application/sdp",
                 status_code=415,
                 media_type="text/plain",
+            )
+        if any(unit.service.requires_playback_reference for unit in pool):
+            return Response(
+                content="Tyger requires WebSocket audio with an aligned playback reference.", status_code=400
             )
         offer_sdp = (await request.body()).decode("utf-8")
 

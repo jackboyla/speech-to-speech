@@ -42,6 +42,9 @@ class MicCaptureProcessor extends AudioWorkletProcessor {
     this._ratio = this._inputRate / this._targetRate;
     this._chunkSamples = Math.round((this._targetRate * chunkMs) / 1000);
     this._scratch = new Float32Array(0);
+    this._reference = new Float32Array(0);
+    this._activity = new Float32Array(0);
+    this._duplex = false;
     this._decimated = new Float32Array(this._chunkSamples);
     this._enabled = true;
 
@@ -56,7 +59,8 @@ class MicCaptureProcessor extends AudioWorkletProcessor {
 
     this.port.onmessage = (e) => {
       const data = e.data;
-      if (data?.kind === "enable") this._enabled = !!data.value;
+      if (data?.kind === "duplex") this._duplex = !!data.enabled;
+      else if (data?.kind === "enable") this._enabled = !!data.value;
       else if (data?.kind === "probe") {
         this.port.postMessage({
           kind: "capture-config",
@@ -77,12 +81,20 @@ class MicCaptureProcessor extends AudioWorkletProcessor {
    * full output chunks as we have material for.
    * @param {Float32Array} incoming
    */
-  _ingest(incoming) {
+  _ingest(incoming, reference, activity) {
     if (incoming.length === 0) return;
     const next = new Float32Array(this._scratch.length + incoming.length);
     next.set(this._scratch, 0);
     next.set(incoming, this._scratch.length);
     this._scratch = next;
+    const append = (previous, channel) => {
+      const result = new Float32Array(previous.length + incoming.length);
+      result.set(previous);
+      if (channel) result.set(channel, previous.length);
+      return result;
+    };
+    this._reference = append(this._reference, reference);
+    this._activity = append(this._activity, activity);
     this._maybeEmit();
   }
 
@@ -142,14 +154,34 @@ class MicCaptureProcessor extends AudioWorkletProcessor {
       }
       this._gateGain = gain;
 
+      let reference;
+      let active = false;
+      if (this._duplex) {
+        reference = new Int16Array(n);
+        for (let i = 0; i < n; i++) {
+          const position = i * r;
+          const index = Math.floor(position);
+          const a = this._reference[index] ?? 0;
+          const b = this._reference[index + 1] ?? a;
+          const sample = Math.abs(r - 2) < 1e-6 ? (a + b) / 2 : a + (b - a) * (position - index);
+          reference[i] = Math.max(-1, Math.min(1, sample)) * (sample < 0 ? 0x8000 : 0x7fff);
+        }
+        active = this._activity.subarray(0, needIn).some((value) => value > 0);
+        if (!this._enabled) out.fill(0);
+      }
+
       // Shift the scratch buffer to keep only the trailing unused samples.
       const consumed = Math.floor(n * r);
       this._scratch = this._scratch.slice(consumed);
+      this._reference = this._reference.slice(consumed);
+      this._activity = this._activity.slice(consumed);
 
       // Live input level for the Settings meter (raw RMS, pre-gate).
       this.port.postMessage({ kind: "level", rms });
 
-      if (this._enabled) {
+      if (this._duplex) {
+        this.port.postMessage({ kind: "duplex", audio: out.buffer, playback: reference.buffer, active }, [out.buffer, reference.buffer]);
+      } else if (this._enabled) {
         this.port.postMessage(out.buffer, [out.buffer]);
       }
       // When disabled (mic muted) we silently consume input so the worklet
@@ -161,7 +193,7 @@ class MicCaptureProcessor extends AudioWorkletProcessor {
     const input = inputs[0];
     if (!input || input.length === 0 || !input[0]) return true;
     const mono = input[0];
-    if (mono.length > 0) this._ingest(mono);
+    if (mono.length > 0) this._ingest(mono, inputs[1]?.[0], inputs[1]?.[1]);
     return true;
   }
 }

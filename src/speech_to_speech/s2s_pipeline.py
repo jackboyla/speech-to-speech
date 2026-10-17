@@ -11,7 +11,7 @@ from queue import Queue
 from sys import modules, platform
 from threading import Event
 from types import FrameType
-from typing import Any, Literal, Optional, Sequence
+from typing import Any, Literal, Optional, Sequence, cast
 
 import nltk
 import torch
@@ -362,6 +362,11 @@ def prepare_all_args(args: ParsedArguments) -> None:
     """Validate selectors and apply the global device to selected configs only."""
 
     prepare_module_args(args.module_kwargs, args.llm_backend)
+    if args.stt_backend.spec.capabilities.owns_turn_detection:
+        if args.module_kwargs.diarization_model_name or args.vad_handler_kwargs.audio_enhancement:
+            raise ValueError("Tyger cannot combine with diarization or VAD audio enhancement.")
+        if args.vad_handler_kwargs.sample_rate != 16000:
+            raise ValueError("Tyger requires --sample_rate 16000.")
     if args.module_kwargs.device is None:
         return
     for field_name in ("stt_backend", "llm_backend", "tts_backend"):
@@ -397,29 +402,33 @@ def _build_handlers(
     """Build a handler chain: VAD → STT/AudioInput → LM → TTS."""
     from speech_to_speech.LLM.lm_output_processor import LMOutputProcessor
 
-    vad = VADHandler(
-        stop_event,
-        queue_in=recv_audio_chunks_queue,
-        queue_out=spoken_prompt_queue,
-        setup_args=(should_listen,),
-        setup_kwargs={
-            **{
-                config_field.name: deepcopy(getattr(vad_handler_kwargs, config_field.name))
-                for config_field in fields(vad_handler_kwargs)
+    owns_turn_detection = stt_backend.spec.capabilities.owns_turn_detection
+    vad = None
+    if not owns_turn_detection:
+        vad = VADHandler(
+            stop_event,
+            queue_in=cast(Queue[Any], recv_audio_chunks_queue),
+            queue_out=spoken_prompt_queue,
+            setup_args=(should_listen,),
+            setup_kwargs={
+                **{
+                    config_field.name: deepcopy(getattr(vad_handler_kwargs, config_field.name))
+                    for config_field in fields(vad_handler_kwargs)
+                },
+                "text_output_queue": text_output_queue,
+                "speculative_turns": speculative_turns,
             },
-            "text_output_queue": text_output_queue,
-            "speculative_turns": speculative_turns,
-        },
-    )
+        )
 
-    if resource_ledger is not None:
-        resource_ledger.append(vad)
+        if resource_ledger is not None:
+            resource_ledger.append(vad)
     # Loading Silero sets PyTorch to one thread for the whole process. Re-apply an explicit
-    # --torch_num_threads after every VAD build, before the other models load and warm up.
+    # --torch_num_threads after VAD construction, before the other models load and warm up.
     apply_torch_num_threads(module_kwargs)
 
     side_handlers: list[Any] = []
     if module_kwargs.diarization_model_name:
+        assert vad is not None
         from speech_to_speech.diarization import StreamingDiarizer
         from speech_to_speech.diarization.streaming import DIARIZATION_DEVICES
         from speech_to_speech.diarization.worker import DiarizationWorker
@@ -463,7 +472,7 @@ def _build_handlers(
     stt_queue_out: Queue[Any] = stt_output_queue if needs_notifier else text_prompt_queue
     stt_context = HandlerContext(
         stop_event=stop_event,
-        queue_in=spoken_prompt_queue,
+        queue_in=recv_audio_chunks_queue if owns_turn_detection else spoken_prompt_queue,
         queue_out=stt_queue_out,
         text_output_queue=text_output_queue,
         should_listen=should_listen,
@@ -478,6 +487,7 @@ def _build_handlers(
     if resource_ledger is not None:
         resource_ledger.append(stt_handler)
     if stt_backend.spec.capabilities.streams_audio_chunks:
+        assert vad is not None
         vad.streaming_stt_sink = stt_handler
     speech_input_handlers = [stt_handler]
     if needs_notifier:
@@ -543,7 +553,7 @@ def _build_handlers(
     if resource_ledger is not None:
         resource_ledger.append(tts)
 
-    handlers = [vad, *side_handlers, *speech_input_handlers, lm, lm_processor, tts]
+    handlers = [*([vad] if vad is not None else []), *side_handlers, *speech_input_handlers, lm, lm_processor, tts]
     if module_kwargs.enable_visemes:
         from speech_to_speech.STV.w2v_stv_handler import Wav2Vec2STVHandler
 
@@ -565,6 +575,8 @@ def _build_handlers(
 
 
 def _stt_session_languages(selection: BackendSelection, handler: Any) -> set[str] | None:
+    if selection.name == "tyger":
+        return {"en"}
     if selection.name == "nemotron-streaming" and getattr(handler, "_is_farsi", False):
         return {"fa"}
     if selection.name == "faster-whisper":
@@ -633,7 +645,11 @@ def _build_pipeline_unit(
         default_instructions=default_instructions,
     )
 
-    if module_kwargs.enable_live_transcription and not stt_selection.spec.capabilities.streams_audio_chunks:
+    if (
+        module_kwargs.enable_live_transcription
+        and not stt_selection.spec.capabilities.streams_audio_chunks
+        and not stt_selection.spec.capabilities.owns_turn_detection
+    ):
         vad_kw.enable_realtime_transcription = True
         vad_kw.realtime_processing_pause = module_kwargs.live_transcription_update_interval
 
@@ -664,7 +680,10 @@ def _build_pipeline_unit(
 
     # Validate only against language sets already known to the active backends.
     # Faster Whisper reports the loaded checkpoint's actual language set.
-    service.stt_supported_languages = _stt_session_languages(stt_selection, handlers[1])
+    service.requires_playback_reference = stt_selection.spec.capabilities.owns_turn_detection
+    service.stt_supported_languages = _stt_session_languages(
+        stt_selection, handlers[0] if service.requires_playback_reference else handlers[1]
+    )
     setup_language = stt_selection.config.get("language")
     service.stt_auto_reset_supported = not (
         stt_selection.name == "openai-realtime" and isinstance(setup_language, str) and bool(setup_language.strip())
@@ -746,6 +765,8 @@ def build_local_pipeline(args: ParsedArguments, stop_event: Event) -> ThreadMana
         load_realtime_tool_module,
     )
 
+    if args.stt_backend.spec.capabilities.owns_turn_detection:
+        raise ValueError("Tyger requires the browser WebSocket demo with aligned playback audio; use serve, not local.")
     local_audio = args.local_audio_kwargs
     playback_buffer_ms = local_audio.local_audio_playback_buffer_ms
     if playback_buffer_ms is None:

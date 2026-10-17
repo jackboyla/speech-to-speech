@@ -373,5 +373,26 @@ for (let i = 1; i < pcm.length; i++) {
 if (zeroCrossings < 78 || zeroCrossings > 82) {
   throw new Error(`resampling changed the 1 kHz tone pitch: ${zeroCrossings} crossings`);
 }
+
+// The paired path uses the same sample grid, including while the mic is muted.
+processor.port.onmessage({ data: { kind: "duplex", enabled: true } });
+const active = new Float32Array(input.length).fill(1);
+processor.process([[input], [input, active]]);
+let paired = messages.filter((message) => message?.kind === "duplex").at(-1);
+if (!paired || !paired.active) throw new Error("missing paired playback");
+const user = new Int16Array(paired.audio);
+const reference = new Int16Array(paired.playback);
+if (user.length !== 960 || user.some((value, i) => value !== reference[i])) {
+  throw new Error("microphone and rendered playback lost their alignment");
+}
+processor.port.onmessage({ data: { kind: "enable", value: false } });
+processor.process([[input], [input, active]]);
+paired = messages.filter((message) => message?.kind === "duplex").at(-1);
+if (new Int16Array(paired.audio).some((value) => value !== 0) || !paired.active) {
+  throw new Error("muting must send silent mic audio with the rendered reference");
+}
+if (!new Int16Array(paired.playback).some((value) => value !== 0)) {
+  throw new Error("muting lost the playback reference");
+}
 """
     )

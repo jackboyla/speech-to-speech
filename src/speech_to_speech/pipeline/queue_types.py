@@ -15,14 +15,14 @@ import numpy as np
 from speech_to_speech.pipeline.control import PipelineControlMessage
 from speech_to_speech.pipeline.events import PipelineEvent
 from speech_to_speech.pipeline.handler_types import LLMIn, LLMOut, STTOut, TTSIn, VADIn, VADOut
-from speech_to_speech.pipeline.messages import AudioOutput
+from speech_to_speech.pipeline.messages import AudioOutput, DuplexAudio
 
 # Use plain ``bytes`` for sentinel values on queues (``PIPELINE_END``, ``AUDIO_RESPONSE_DONE``).
 # ``Queue`` is invariant; ``Literal[b"END"]`` is not accepted where ``bytes`` is required.
 PipelineInternalItem: TypeAlias = PipelineControlMessage | bytes
 
 # Audio chunks decoded from Realtime transports into VAD.
-AudioInItem: TypeAlias = VADIn | PipelineControlMessage
+AudioInItem: TypeAlias = VADIn | DuplexAudio | PipelineControlMessage
 
 # Audio segments flowing from VAD to STT.
 VADOutItem: TypeAlias = VADOut | PipelineInternalItem

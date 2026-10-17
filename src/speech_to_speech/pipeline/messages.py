@@ -46,6 +46,16 @@ class PipelineMessage(BaseModel):
 # ── VAD → STT ─────────────────────────────────────────────────────────
 
 
+class DuplexAudio(PipelineMessage):
+    """Microphone and rendered speaker PCM16 aligned at 16 kHz."""
+
+    tag: Literal["duplex_audio"] = "duplex_audio"
+    audio: bytes
+    playback: bytes
+    playback_active: bool
+    runtime_config: RuntimeConfig
+
+
 class VADAudio(PipelineMessage):
     """Audio segment from VAD, with optional mode for realtime transcription."""
 
