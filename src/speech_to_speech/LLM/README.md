@@ -58,6 +58,12 @@ speech-to-speech local --llm_backend responses-api
 
 Speech recognition and synthesis stay local either way. With a hosted provider, transcribed text and conversation history are sent to it. See [LLM backends](../../../README.md#llm-backends) for the llama.cpp setup, provider examples, and direct audio input.
 
+### Responses without new user input
+
+Realtime `response.create` can request another reply after a completed assistant message. Some Chat Completions providers instead treat that last message as unfinished text to continue (assistant prefill), which can produce an empty completion. Configure the provider to start a new assistant message.
+
+For llama.cpp, use [`--no-prefill-assistant`](https://github.com/ggml-org/llama.cpp/tree/master/tools/server#usage), as in the startup examples and Docker Compose configuration. For Ollama 0.40.6 using its llama.cpp runner, set `LLAMA_ARG_PREFILL_ASSISTANT=0` in the **Ollama server's environment** before starting it. Changing the speech-to-speech process's environment does not configure an already-running provider.
+
 ## Language behavior
 
 `--enable_lang_prompt` adds a per-turn instruction asking the LLM to reply in the language reported by STT. It is off by default. Parakeet chooses its transcription language automatically; the Whisper backends accept `--language auto` or a fixed code.

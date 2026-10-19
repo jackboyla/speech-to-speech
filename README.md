@@ -389,6 +389,7 @@ llama-server \
     --alias local-gemma \
     --host 127.0.0.1 --port 8080 \
     -ngl all -np 1 -c 8192 -fa on \
+    --no-prefill-assistant \
     --no-mmproj \
     --reasoning off
 ```

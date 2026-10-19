@@ -49,6 +49,7 @@ llama-server \
     -c 16384 \
     -np 1 \
     -fa on \
+    --no-prefill-assistant \
     --host 127.0.0.1 \
     --port 8080
 ```
