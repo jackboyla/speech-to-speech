@@ -161,6 +161,7 @@ class _GenState(BaseModel):
     tools: list[ResponseFunctionToolCall] = Field(default_factory=list)
     history_items: list[SupportedItem] = Field(default_factory=list)
     clean_text: str = ""  # filtered text, kept only for the debug log
+    provider_text_chars: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     output_emitted: bool = False
@@ -602,13 +603,14 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
         sentence_batch: list[str] = []
 
         def _flush(batch: list[str]) -> Iterator[LLMOut]:
-            if not batch:
+            text = " ".join(batch)
+            if not text.strip():
                 return
             if not self._turn_output_allowed(turn.turn_id, turn.turn_revision):
                 logger.info("LLM generation cancelled (stale speculative turn)")
                 return
             state.output_emitted = True
-            yield self._chunk(turn, text=" ".join(batch))
+            yield self._chunk(turn, text=text)
 
         for event in events:
             # Provider usage is billable even when cancellation rolls back the
@@ -817,6 +819,8 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
 
                     def measured_events() -> Iterator[ProviderEvent]:
                         for event in events:
+                            if isinstance(event, TextDelta):
+                                state.provider_text_chars += len(event.text)
                             if (
                                 self.stream
                                 and tracker is not None
@@ -864,12 +868,7 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
                     state.ending.status,
                     state.ending.finish_reason,
                     generation_completed,
-                    sum(
-                        len(part.text or "")
-                        for item in state.history_items
-                        if isinstance(item, RealtimeConversationItemAssistantMessage)
-                        for part in item.content
-                    ),
+                    state.provider_text_chars,
                     len(state.tools),
                     state.output_emitted,
                     state.input_tokens,

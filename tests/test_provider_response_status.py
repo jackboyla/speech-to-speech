@@ -316,6 +316,7 @@ def test_direct_audio_uses_chat_completion_status(backend, stream):
 def test_cancelled_generation_ignores_provider_terminal(backend, signal, caplog):
     from speech_to_speech.pipeline.cancel_scope import CancelScope
 
+    caplog.set_level(logging.DEBUG, logger="speech_to_speech.LLM.base_openai_compatible_language_model")
     scope = CancelScope()
     handler = (_chat_handler if backend == "chat" else _responses_handler)(stream=True)
     handler.cancel_scope = scope
@@ -345,6 +346,7 @@ def test_cancelled_generation_ignores_provider_terminal(backend, signal, caplog)
     assert end.status == "completed"  # The router owns cancellation; no provider override.
     assert not any(item.get("role") == "assistant" for item in request.runtime_config.chat.to_responses_api_chat())
     assert "LLM completed without output" not in caplog.text
+    assert f"provider_text_chars={len(TEXT)}" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -508,15 +510,16 @@ def test_successful_empty_provider_output_completes(backend, stream, kind, modal
 
 
 @pytest.mark.parametrize("stream", [True, False])
-def test_whitespace_only_provider_output_is_distinguishable_from_empty(stream, caplog):
+@pytest.mark.parametrize("text", [" \n ", "#", "```\n```"])
+def test_filtered_provider_output_is_distinguishable_from_empty(stream, text, caplog):
     payload = (
-        [_chat_chunk(" \n "), _chat_chunk(finish_reason="stop")] if stream else _provider_payload("chat", False, "stop")
+        [_chat_chunk(text), _chat_chunk(finish_reason="stop")] if stream else _provider_payload("chat", False, "stop")
     )
     if not stream:
-        payload["choices"][0]["message"]["content"] = " \n "
+        payload["choices"][0]["message"]["content"] = text
     response, _, _, _, _ = _run("chat", stream, "stop", "audio", payload)
 
     assert response.status == "completed"
     assert response.output == []
     assert "LLM completed without output" in caplog.text
-    assert "provider_text_chars=3" in caplog.text
+    assert f"provider_text_chars={len(text)}" in caplog.text
