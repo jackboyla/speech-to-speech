@@ -281,6 +281,7 @@ class BaseLanguageModelHandler(BaseHandler[LLMIn, LLMOut], ABC):
         wants_audio: bool = True,
         *,
         language_name: str | None = None,
+        for_response: bool = False,
     ) -> None:
         if not instructions and not language_name:
             return
@@ -297,12 +298,15 @@ class BaseLanguageModelHandler(BaseHandler[LLMIn, LLMOut], ABC):
                 instructions or "",
                 tool_section=tool_section,
                 language_name=language_name,
+                for_response=for_response,
             )
             block_regex = build_block_regex()
             enter_code = ENTER_CODE
             end_code = END_CODE
         else:
-            full_instructions = build_system_prompt(instructions or "", language_name=language_name)
+            full_instructions = build_system_prompt(
+                instructions or "", language_name=language_name, for_response=for_response
+            )
             block_regex = None
             enter_code = None
             end_code = None
@@ -622,6 +626,7 @@ class BaseLanguageModelHandler(BaseHandler[LLMIn, LLMOut], ABC):
             ctx,
             response_wants_audio(response),
             language_name=lang_name,
+            for_response=response is not None and response.instructions is not None,
         )
 
         # Images the model sees this turn; only these are stripped on write-back,

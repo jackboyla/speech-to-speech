@@ -992,16 +992,24 @@ def test_out_of_band_does_not_commit_to_default_conversation():
 # ── Standalone runner (no pytest required) ────────────────────────────────────
 
 
-def test_chat_backend_keeps_injected_context_with_session_instructions():
+@pytest.mark.parametrize("modality", ["audio", "text"])
+def test_chat_backend_keeps_context_and_scopes_response_instructions(modality):
     handler = _make_handler(stream=False)
     chat = Chat(10)
     snapshot = make_system_message("CURRENT CHAT SNAPSHOT")
     chat.add_item(snapshot)
+    chat.add_item(make_user_message("What was my last question?"))
 
-    for _ in range(2):
-        _drive(handler, chat=chat, instructions="SESSION INSTRUCTIONS")
-        prompt = handler.client.chat.completions.last_kwargs["messages"][0]["content"]
-        assert "SESSION INSTRUCTIONS" in prompt
+    for override in (None, "ONE RESPONSE ONLY", "", None):
+        history = chat.to_transformers_chat()[1:]
+        response = RealtimeResponseCreateParams(instructions=override, output_modalities=[modality])
+        _drive(handler, chat=chat, user="", instructions="SESSION INSTRUCTIONS", response=response)
+        messages = handler.client.chat.completions.last_kwargs["messages"]
+        prompt = messages[0]["content"]
+        assert ("SESSION INSTRUCTIONS" in prompt) == (override is None)
+        assert ("ONE RESPONSE ONLY" in prompt) == bool(override)
+        assert ("Instructions for the next response:" in prompt) == bool(override)
+        assert messages[1:] == history
         assert prompt.count("CURRENT CHAT SNAPSHOT") == 1
         assert chat.init_chat_message is snapshot
         assert snapshot.content[0].text == "CURRENT CHAT SNAPSHOT"

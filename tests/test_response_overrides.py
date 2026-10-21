@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import Any, Optional
 
+import pytest
 from openai.types.realtime import RealtimeSessionCreateRequest
 from openai.types.realtime.realtime_response_create_params import RealtimeResponseCreateParams
 
@@ -85,7 +86,8 @@ def test_local_backend_preserves_response_creation_language():
     assert outputs[0].selected_language == "es"
 
 
-def test_local_backend_keeps_injected_context_with_session_instructions():
+@pytest.mark.parametrize("modality", ["audio", "text"])
+def test_local_backend_keeps_context_and_scopes_response_instructions(modality):
     handler = object.__new__(_RecordingLocalHandler)
     handler.cancel_scope = None
     handler.speculative_turns = None
@@ -101,10 +103,16 @@ def test_local_backend_keeps_injected_context_with_session_instructions():
         session=RealtimeSessionCreateRequest(type="realtime", instructions="SESSION INSTRUCTIONS"),
     )
 
-    for _ in range(2):
-        list(handler.process(GenerateResponseRequest(runtime_config=config)))
-        prompt = handler.seen_chat.to_transformers_chat()[0]["content"]
-        assert "SESSION INSTRUCTIONS" in prompt
+    history = chat.to_transformers_chat()[1:]
+    for override in (None, "ONE RESPONSE ONLY", "", None):
+        response = RealtimeResponseCreateParams(instructions=override, output_modalities=[modality])
+        list(handler.process(GenerateResponseRequest(runtime_config=config, response=response)))
+        messages = handler.seen_chat.to_transformers_chat()
+        prompt = messages[0]["content"]
+        assert ("SESSION INSTRUCTIONS" in prompt) == (override is None)
+        assert ("ONE RESPONSE ONLY" in prompt) == bool(override)
+        assert ("Instructions for the next response:" in prompt) == bool(override)
+        assert messages[1:] == history
         assert prompt.count("CURRENT CHAT SNAPSHOT") == 1
         assert chat.init_chat_message is snapshot
         assert snapshot.content[0].text == "CURRENT CHAT SNAPSHOT"

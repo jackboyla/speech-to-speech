@@ -25,7 +25,7 @@ VOICE_SYSTEM_PROMPT_TAIL = """\
 _VOICE_SYSTEM_PROMPT_FULL = """\
 {lead}
 
-Session Prompt:
+{prompt_label}
 {session_prompt}{optional_tools}{optional_language}
 
 {tail}
@@ -37,6 +37,7 @@ def build_voice_system_prompt(
     *,
     tool_section: str = "",
     language_name: str | None = None,
+    for_response: bool = False,
 ) -> str:
     """Context → session prompt → optional tool block → optional language hint → voice rules."""
     tools = tool_section.strip()
@@ -47,6 +48,12 @@ def build_voice_system_prompt(
     return _VOICE_SYSTEM_PROMPT_FULL.format(
         lead=VOICE_SYSTEM_PROMPT_LEAD.rstrip(),
         session_prompt=session_prompt.strip(),
+        prompt_label=(
+            "Instructions for the next response:\n"
+            "Apply these instructions to your next reply, even when no new user message follows."
+            if for_response and session_prompt.strip()
+            else "Session Prompt:"
+        ),
         optional_tools=optional_tools,
         optional_language=optional_language,
         tail=VOICE_SYSTEM_PROMPT_TAIL.rstrip(),

@@ -1874,7 +1874,8 @@ def test_response_history_precedes_speech_that_arrived_during_generation():
     assert [part.text for item in chat.buffer for part in item.content if part.text] == ["A", "answer A", "B"]
 
 
-def test_responses_backend_keeps_injected_context_with_session_instructions():
+@pytest.mark.parametrize("modality", ["audio", "text"])
+def test_responses_backend_keeps_context_and_scopes_response_instructions(modality):
     handler = _make_handler(stream=False)
     captured = []
 
@@ -1888,10 +1889,15 @@ def test_responses_backend_keeps_injected_context_with_session_instructions():
     snapshot = make_system_message("CURRENT CHAT SNAPSHOT")
     request.runtime_config.chat.add_item(snapshot)
 
-    for _ in range(2):
+    for override in (None, "ONE RESPONSE ONLY", "", None):
+        request.response = RealtimeResponseCreateParams(instructions=override, output_modalities=[modality])
+        history = request.runtime_config.chat.to_responses_api_chat()[1:]
         list(drive_llm(handler, request))
         prompt = captured[-1]["input"][0]["content"][0]["text"]
-        assert "SESSION INSTRUCTIONS" in prompt
+        assert ("SESSION INSTRUCTIONS" in prompt) == (override is None)
+        assert ("ONE RESPONSE ONLY" in prompt) == bool(override)
+        assert ("Instructions for the next response:" in prompt) == bool(override)
+        assert captured[-1]["input"][1:] == history
         assert prompt.count("CURRENT CHAT SNAPSHOT") == 1
         assert request.runtime_config.chat.init_chat_message is snapshot
         assert snapshot.content[0].text == "CURRENT CHAT SNAPSHOT"

@@ -520,11 +520,12 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
         wants_audio: bool = True,
         *,
         language_name: str | None = None,
+        for_response: bool = False,
     ) -> None:
         if not instructions and not language_name:
             return
         builder = build_voice_system_prompt if wants_audio else build_text_system_prompt
-        full_instructions = builder(instructions or "", language_name=language_name)
+        full_instructions = builder(instructions or "", language_name=language_name, for_response=for_response)
         chat.prepend_instructions(full_instructions)
 
     # ── output helpers ──────────────────────────────────────────────────────--
@@ -1013,7 +1014,13 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
             response.tool_choice if response and response.tool_choice else runtime_config.session.tool_choice
         )
         wants_audio = response_wants_audio(response)
-        self._apply_config(active_chat, instructions, wants_audio, language_name=lang_name)
+        self._apply_config(
+            active_chat,
+            instructions,
+            wants_audio,
+            language_name=lang_name,
+            for_response=response is not None and response.instructions is not None,
+        )
 
         optional_kwargs = self._build_audio_optional_kwargs(response, req_tools, req_tool_choice)
         input_history = None
@@ -1130,7 +1137,13 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
             response.tool_choice if response and response.tool_choice else runtime_config.session.tool_choice
         )
         wants_audio = response_wants_audio(response)
-        self._apply_config(active_chat, instructions, wants_audio, language_name=lang_name)
+        self._apply_config(
+            active_chat,
+            instructions,
+            wants_audio,
+            language_name=lang_name,
+            for_response=response is not None and response.instructions is not None,
+        )
 
         optional_kwargs = self._build_optional_kwargs(req_tools, req_tool_choice)
 
