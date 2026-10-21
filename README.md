@@ -241,6 +241,7 @@ This installs the package in editable mode. With the environment activated, use 
 | VAD | [Silero VAD v5](https://github.com/snakers4/silero-vad) | all | built-in |
 | VAD | [FireRed Stream-VAD](https://huggingface.co/FireRedTeam/FireRedVAD) | CUDA / CPU | `fireredvad` |
 | STT | [Parakeet TDT](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) (default) | CUDA / CPU through nano-parakeet, Apple Silicon through MLX | built-in |
+| STT | [Parakeet Redux](https://huggingface.co/moondream/parakeet-redux) | CPU (including Apple Silicon) / supported NVIDIA GPUs through Photon | `parakeet-redux` |
 | STT | [Parakeet Unified](https://huggingface.co/nvidia/parakeet-unified-en-0.6b) | CUDA / CPU | `nemo` |
 | STT | [Nemotron Speech Streaming](https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b) | CUDA / CPU | `nemo` |
 | STT | [Nemotron Streaming Farsi](https://huggingface.co/mehdi-hf/nemotron-asr-streaming-farsi), selected with `--stt nemotron-streaming --nemotron_streaming_model_name mehdi-hf/nemotron-asr-streaming-farsi` | CUDA / CPU | `nemo`, NeMo >=3.0, Python >=3.11 |

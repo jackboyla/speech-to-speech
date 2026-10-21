@@ -17,6 +17,7 @@ speech-to-speech local --stt whisper --language auto --stt_device cuda
 - `mlx-audio-whisper` → `STT/mlx_audio_whisper_handler.py`
 - `faster-whisper` → `STT/faster_whisper_handler.py`
 - `parakeet-tdt` → `STT/parakeet_tdt_handler.py`
+- `parakeet-redux` → `STT/parakeet_redux_handler.py`
 - `parakeet-unified` → `STT/nemo_asr_handler.py`
 - `nemotron-streaming` → `STT/nemo_asr_handler.py`
 - `orukeet` → `STT/nemo_asr_handler.py`
@@ -25,6 +26,27 @@ speech-to-speech local --stt whisper --language auto --stt_device cuda
 - `openai` → `STT/openai_compatible_handler.py`
 
 ## Language Support by Handler
+
+### Parakeet Redux (`--stt parakeet-redux`)
+
+```bash
+pip install "speech-to-speech[parakeet-redux]"
+speech-to-speech serve --stt parakeet-redux --parakeet_redux_device cpu --torch_num_threads 4
+```
+
+Runs [Moondream's Parakeet Redux](https://huggingface.co/moondream/parakeet-redux) locally through Photon.
+`--parakeet_redux_device auto` selects CUDA when available, otherwise CPU. Apple Silicon uses the CPU;
+Metal inference is not supported by this handler. CUDA support depends on the
+[Photon runtime](https://docs.moondream.ai/running-locally/). The first launch downloads the model.
+CPU inference uses the process-wide `--torch_num_threads` setting, shared with VAD and other PyTorch models.
+
+Redux supports 25 European languages and chooses the transcription language automatically.
+Text-based detection labels final transcripts when it can identify the language; it does not constrain decoding.
+Forced session languages are unsupported. Progressive audio windows produce partial transcripts by
+transcribing each window again; this backend does not retain streaming decoder state between windows.
+
+The model uses the CC-BY-4.0 license; see its model card for attribution.
+Photon runs inference locally but sends runtime usage telemetry to Moondream, including the hostname and request counts.
 
 ### 1) Whisper (`--stt whisper`)
 

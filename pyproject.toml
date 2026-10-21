@@ -105,6 +105,9 @@ sensevoice = [
 pocket = [
     "pocket-tts>=2.0.0",
 ]
+parakeet-redux = [
+    "moondream>=2.6.1,<3",
+]
 phonon = [
     "ptts==0.4.0",
 ]

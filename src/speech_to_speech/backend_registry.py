@@ -37,6 +37,7 @@ from speech_to_speech.arguments_classes.openai_stt_arguments import OpenAICompat
 from speech_to_speech.arguments_classes.openai_tts_arguments import OpenAICompatibleTTSHandlerArguments
 from speech_to_speech.arguments_classes.orukeet_stt_arguments import OrukeetSTTHandlerArguments
 from speech_to_speech.arguments_classes.paraformer_stt_arguments import ParaformerSTTHandlerArguments
+from speech_to_speech.arguments_classes.parakeet_redux_stt_arguments import ParakeetReduxSTTHandlerArguments
 from speech_to_speech.arguments_classes.parakeet_tdt_arguments import (
     ParakeetTDTSTTHandlerArguments,
 )
@@ -410,6 +411,18 @@ STT_BACKENDS = build_backend_registry(
             ParakeetTDTSTTHandlerArguments,
             _create_parakeet,
             config_prefix="parakeet_tdt",
+        ),
+        BackendSpec(
+            "parakeet-redux",
+            "stt",
+            ParakeetReduxSTTHandlerArguments,
+            _simple_handler_factory(
+                "speech_to_speech.STT.parakeet_redux_handler",
+                "ParakeetReduxSTTHandler",
+                attach_speculative_turns=True,
+            ),
+            config_prefix="parakeet_redux",
+            required_extra="parakeet-redux",
         ),
         BackendSpec(
             "parakeet-unified",

@@ -24,6 +24,7 @@ from speech_to_speech.STT.base_stt_handler import BaseSTTHandler
 
 # (module, class, extra attributes process()/on_session_end() needs)
 _STT_HANDLERS = [
+    ("speech_to_speech.STT.parakeet_redux_handler", "ParakeetReduxSTTHandler", {}),
     ("speech_to_speech.STT.parakeet_tdt_handler", "ParakeetTDTSTTHandler", {"enable_live_transcription": False}),
     ("speech_to_speech.STT.whisper_stt_handler", "WhisperSTTHandler", {}),
     ("speech_to_speech.STT.mlx_audio_whisper_handler", "MLXAudioWhisperSTTHandler", {}),
@@ -36,6 +37,7 @@ _STT_HANDLERS = [
 # these means the import broke, not that an extra is missing -- so fail instead of passing
 # vacuously, which is how a half-installed environment hid four of these locally.
 _ALWAYS_IMPORTABLE = {
+    "speech_to_speech.STT.parakeet_redux_handler",
     "speech_to_speech.STT.parakeet_tdt_handler",
     "speech_to_speech.STT.whisper_stt_handler",
     "speech_to_speech.STT.mlx_audio_whisper_handler",
