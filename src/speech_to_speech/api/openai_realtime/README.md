@@ -164,6 +164,49 @@ an explicit `session.update` with `tools: []`. HF queueing, authentication,
 metering, camera capture, and device selection remain outside the Realtime
 protocol layer. No custom SDK transport is used.
 
+### Optional decision-model interruption gate
+
+Set `--backchannel_url` on `serve` or `local` to classify speech that overlaps
+assistant playback before cancelling the response. Acknowledgments such as
+“mm-hmm” can leave playback running; interruptions follow the normal cancellation
+path. The gate is off by default and requires an STT backend that emits transcripts.
+
+Run a decision server separately, then point the speech server at its root URL:
+
+```bash
+speech-to-speech serve --backchannel_url http://127.0.0.1:8093 \
+  --backchannel_model YOUR_SERVED_MODEL
+```
+
+The endpoint must implement `POST /v1/systemone` with named `choice` questions
+and return `answers.turn.probabilities.interruption`. The request sends the user
+transcript and recent assistant response text to that server. Omit
+`--backchannel_model` only when the server selects a default model.
+[Transformers 5.20.2](https://github.com/huggingface/transformers/blob/v5.20.2/docs/source/en/serve-cli/serving.md#v1systemone)
+provides this endpoint for next-token choice scoring; models with custom decision
+heads need their own compatible runtime. Choose and evaluate the model's prompt,
+labels and calibration together. API compatibility does not establish accuracy.
+
+For YAML configuration, put the same `backchannel_*` fields under `runtime.server`.
+`--backchannel_threshold` defaults to `0.5`: probabilities at or above it release
+an interruption. Lower thresholds favour catching interruptions. A partial
+transcript can release a turn, but only a final acknowledgment can suppress it,
+after the speculative reopen gate settles. Suppressed turns do not enter chat history.
+
+A failed or invalid classification, missing transcript, or exhausted
+`--backchannel_max_hold_ms` (default `1500`) releases the input through normal
+handling. `--backchannel_timeout_ms` defaults to `300` per HTTP operation; the
+maximum hold starts at confirmed VAD speech onset and includes transcription and
+reopen grace. If that grace exceeds the hold, even a classified acknowledgment is
+released. Explicit client cancellation remains immediate, and
+`interrupt_response: false` bypasses classification.
+
+Playback timing is estimated from sent audio; network and client buffering can
+shift the actual overlap. Assistant context can include text ahead of playback.
+Clients must follow server interruption events: a client that independently stops
+on local VAD will still cut off acknowledgments. Measure missed interruptions and
+added stop latency with real speech before enabling this in a deployment.
+
 ### Input transcription semantics
 
 Internal partial transcriptions are cumulative hypotheses. Before emitting `conversation.item.input_audio_transcription.delta`, the Realtime server compares consecutive hypotheses at normalized word boundaries and holds back the newest matching word. Only confirmed growth beyond the per-item committed prefix reaches the append-only wire stream; unstable casing and edge punctuation are left to the final transcript. If a later hypothesis revises a word that was already emitted, that partial is withheld because the protocol has no transcript-retraction event, but subsequent hypotheses can resume the stream when they extend the committed prefix. Clients should treat `conversation.item.input_audio_transcription.completed` as authoritative and replace any rendered partial for the same `item_id` with its final `transcript`. Turn metadata routes out-of-order completions to their originating item, and bundled clients retain each unresolved item's transcript until completion so later deltas and empty authoritative completions remain correct.

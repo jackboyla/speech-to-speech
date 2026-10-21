@@ -4,6 +4,7 @@ from threading import Event
 
 import uvicorn
 
+from speech_to_speech.api.openai_realtime.backchannel import BackchannelConfig
 from speech_to_speech.api.openai_realtime.llm_proxy import LLMProxyConfig
 from speech_to_speech.api.openai_realtime.pipeline_unit import PipelineUnit
 from speech_to_speech.api.openai_realtime.websocket_router import create_app
@@ -27,6 +28,7 @@ class RealtimeServer:
         host: str = "0.0.0.0",
         port: int = 8765,
         llm_proxy_config: LLMProxyConfig | None = None,
+        backchannel_config: BackchannelConfig | None = None,
     ) -> None:
         if not pool:
             raise ValueError("RealtimeServer requires at least one PipelineUnit in the pool")
@@ -35,10 +37,16 @@ class RealtimeServer:
         self.host = host
         self.port = port
         self.llm_proxy_config = llm_proxy_config
+        self.backchannel_config = backchannel_config
 
     def run(self) -> None:
         """Start the FastAPI/uvicorn server (called from a ThreadManager thread)."""
-        app = create_app(pool=self.pool, stop_event=self.stop_event, llm_proxy_config=self.llm_proxy_config)
+        app = create_app(
+            pool=self.pool,
+            stop_event=self.stop_event,
+            llm_proxy_config=self.llm_proxy_config,
+            backchannel_config=self.backchannel_config,
+        )
 
         logger.info(
             f"OpenAI Realtime API starting on ws://{self.host}:{self.port}/v1/realtime (pool size {len(self.pool)})"

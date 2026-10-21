@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from speech_to_speech.api.openai_realtime.backchannel import BackchannelGate
 from speech_to_speech.api.openai_realtime.service import RealtimeService
 from speech_to_speech.api.openai_realtime.transports import SessionTransport
 from speech_to_speech.pipeline.cancel_scope import CancelScope
@@ -48,6 +49,9 @@ class SessionState(BaseModel):
     # its handlers may still emit this session's output — until SESSION_END
     # actually drains. Reported as "stuck" by /v1/pool.
     quarantined_at: Optional[float] = None
+    # BackchannelGate when --backchannel_url is set; holds user turns that
+    # start during assistant playback until they are classified.
+    backchannel_gate: BackchannelGate | None = None
 
 
 class PipelineUnit(BaseModel):

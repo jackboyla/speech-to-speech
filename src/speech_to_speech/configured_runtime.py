@@ -322,7 +322,7 @@ def build_configured_server(config: ResolvedConfig, stop_event: Event, *, local:
     try:
         from speech_to_speech.api.openai_realtime.audio_client import RealtimeAudioClient
         from speech_to_speech.api.openai_realtime.server import RealtimeServer
-        from speech_to_speech.s2s_pipeline import build_llm_proxy_config
+        from speech_to_speech.s2s_pipeline import build_backchannel_config, build_llm_proxy_config
 
         args = next(iter(arguments.values()))
         event = result._events[0]
@@ -331,6 +331,7 @@ def build_configured_server(config: ResolvedConfig, stop_event: Event, *, local:
             pool=next(iter(result.pools.values())),
             host="127.0.0.1" if local else args.realtime_server_kwargs.host,
             port=args.realtime_server_kwargs.port,
+            backchannel_config=build_backchannel_config(args.realtime_server_kwargs),
             llm_proxy_config=build_llm_proxy_config(args.module_kwargs, args.llm_backend)
             if args.module_kwargs.enable_llm_proxy
             else None,

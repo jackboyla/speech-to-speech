@@ -188,12 +188,14 @@ def test_bounded_stop_retains_resources_until_worker_finishes(config, monkeypatc
 
 def test_local_uses_one_client_and_preserves_explicit_settings(config, builder, monkeypatch):
     config.pipelines = {"primary": config.pipelines["primary"]}
-    config.runtime["server"]["port"] = 12345
+    config.runtime["server"].update(port=12345, backchannel_url="http://localhost:8093", backchannel_model="decision")
     config.client.update(playback_buffer_ms=0, api_key="", model="custom", voice="alloy", input_device=0)
     for key in ("playback_buffer_ms", "api_key", "model", "voice", "input_device"):
         config.sources[("runtime", "client", key)] = "file"
     result = runtime.build_configured_server(config, Event(), local=True)
     assert result.server.host == "127.0.0.1"
+    assert result.server.backchannel_config.url == "http://localhost:8093"
+    assert result.server.backchannel_config.model == "decision"
     assert len(result.pools["primary"]) == 2
     assert result.client.config.url == "ws://127.0.0.1:12345/v1/realtime"
     assert result.client.config.playback_buffer_ms == 0

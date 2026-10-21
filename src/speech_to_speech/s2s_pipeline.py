@@ -17,11 +17,13 @@ import nltk
 import torch
 from transformers import HfArgumentParser
 
+from speech_to_speech.api.openai_realtime.backchannel import BackchannelConfig
 from speech_to_speech.api.openai_realtime.pipeline_unit import PipelineUnit
 from speech_to_speech.arguments_classes.language_model_arguments import MLX_DEFAULT_LM_MODEL
 from speech_to_speech.arguments_classes.local_audio_arguments import LocalAudioArguments
 from speech_to_speech.arguments_classes.module_arguments import ModuleArguments
 from speech_to_speech.arguments_classes.realtime_server_arguments import (
+    BackchannelArguments,
     LocalRealtimeServerArguments,
     RealtimeServerArguments,
 )
@@ -131,6 +133,18 @@ def build_llm_proxy_config(
         upstream_api_key=config["api_key"],
         model_name=config["model_name"],
         connect_timeout_s=module_kwargs.llm_proxy_connect_timeout_s,
+    )
+
+
+def build_backchannel_config(backchannel_kwargs: BackchannelArguments) -> BackchannelConfig | None:
+    if not backchannel_kwargs.backchannel_url:
+        return None
+    return BackchannelConfig(
+        url=backchannel_kwargs.backchannel_url,
+        model=backchannel_kwargs.backchannel_model,
+        threshold=backchannel_kwargs.backchannel_threshold,
+        max_hold_ms=backchannel_kwargs.backchannel_max_hold_ms,
+        timeout_ms=backchannel_kwargs.backchannel_timeout_ms,
     )
 
 
@@ -262,7 +276,7 @@ def parse_arguments(
     else:
         realtime_server_kwargs = RealtimeServerArguments(
             host="127.0.0.1",
-            port=by_type[LocalRealtimeServerArguments].port,
+            **vars(by_type[LocalRealtimeServerArguments]),
         )
 
     module_kwargs = by_type[ModuleArguments]
@@ -360,6 +374,7 @@ def prepare_module_args(module_kwargs: ModuleArguments, llm_backend: BackendSele
 def prepare_all_args(args: ParsedArguments) -> None:
     """Validate selectors and apply the global device to selected configs only."""
 
+    build_backchannel_config(args.realtime_server_kwargs)
     prepare_module_args(args.module_kwargs, args.llm_backend)
     if args.module_kwargs.device is None:
         return
@@ -735,6 +750,7 @@ def build_pipeline(
         llm_proxy_config=(
             build_llm_proxy_config(module_kwargs, args.llm_backend) if module_kwargs.enable_llm_proxy else None
         ),
+        backchannel_config=build_backchannel_config(args.realtime_server_kwargs),
     )
 
     handlers: list[Any] = []

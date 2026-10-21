@@ -21,6 +21,7 @@ from openai.types.realtime import (
     SessionUpdateEvent,
 )
 
+from speech_to_speech.api.openai_realtime.backchannel import BackchannelConfig, BackchannelGate, SystemOneClassifier
 from speech_to_speech.api.openai_realtime.llm_proxy import LLMProxyConfig, mount_llm_proxy
 from speech_to_speech.api.openai_realtime.pipeline_unit import PipelineUnit, SessionState
 from speech_to_speech.api.openai_realtime.service import (
@@ -353,6 +354,9 @@ def _release_session(unit: PipelineUnit, session_id: str) -> None:
         # Already released (e.g. duplicate close callbacks racing).
         return
     old_session.released_at = time.monotonic()
+    if old_session.backchannel_gate is not None:
+        old_session.backchannel_gate.close()
+        old_session.backchannel_gate = None
     # The send loop can be parked on output from an unclaimed internal
     # prefetch. Invalidate that response while its connection state is still
     # registered, and drop the per-session held item so SESSION_END can drain.
@@ -383,6 +387,72 @@ def _release_session(unit: PipelineUnit, session_id: str) -> None:
     task = asyncio.create_task(_release_unit_after_drain(unit, old_session, session_id))
     _release_tasks.add(task)
     task.add_done_callback(_release_tasks.discard)
+
+
+async def _handle_text_event(
+    unit: PipelineUnit,
+    transport: SessionTransport | None,
+    session_id: str | None,
+    text_msg: Any,
+    *,
+    parked_index: int | None = None,
+) -> None:
+    """Dispatch one text-queue event; a speech start cancels the active response."""
+    is_speech_start = isinstance(text_msg, SpeechStartedEvent)
+    was_in_response = False
+    was_response_pending = False
+    if is_speech_start and session_id:
+        st = unit.service._state(session_id)
+        was_in_response = st.in_response
+        was_response_pending = st.response_pending
+
+    if transport is not None and isinstance(text_msg, PipelineEvent) and session_id:
+        try:
+            events = unit.service.dispatch_pipeline_event(session_id, text_msg)
+        except TurnOutputHeld:
+            if unit.session is not None:
+                pending_items = unit.session.pending_text_output_items
+                pending_items.insert(len(pending_items) if parked_index is None else parked_index, text_msg)
+            return
+        if events:
+            await transport.send_events(events)
+
+    if isinstance(text_msg, SpeechStartedEvent) and session_id:
+        active_cfg = unit.service._state(session_id).runtime_config
+        interrupt_enabled = text_msg.interrupt_response and (
+            active_cfg is None or active_cfg.interrupt_response_enabled
+        )
+        if interrupt_enabled and transport is not None:
+            # Flush even when no response is active: the WebRTC
+            # track can still hold unplayed audio from a response
+            # whose done-sentinel was already observed —
+            # finish_response() runs on the sentinel, not when
+            # playback completes. No-op over WebSocket.
+            transport.discard_pending_audio()
+        if interrupt_enabled:
+            _stop_gated_playback(unit)
+        if was_in_response or was_response_pending:
+            if interrupt_enabled:
+                unit.cancel_scope.cancel()
+                unit.service.close_pending_responses(session_id)
+                _flush_queue(unit.text_prompt_queue, preserve=_keep_pipeline_control)
+                _flush_queue(unit.output_queue, preserve=_keep_cancel_bookkeeping)
+                _flush_queue(unit.text_output_queue, preserve=_keep_user_text_event)
+                if unit.response_playing.is_set():
+                    unit.response_playing.clear()
+                logger.info(
+                    "Pipeline %d: speech during %s: cancelled, queue flushed",
+                    unit.index,
+                    "response" if was_in_response else "pending response",
+                )
+            else:
+                logger.info(f"Pipeline {unit.index}: speech during response: interrupt_response disabled, ignoring")
+
+
+def _stop_gated_playback(unit: PipelineUnit, *, release_pending: bool = False) -> None:
+    session = unit.session
+    if session is not None and session.backchannel_gate is not None:
+        session.backchannel_gate.stop_playback(release_pending=release_pending)
 
 
 async def _dispatch_client_event(
@@ -455,6 +525,7 @@ async def _dispatch_client_event(
             return
         _flush_queue(unit.output_queue, preserve=_keep_non_audio_output)
         transport.discard_pending_audio()
+        _stop_gated_playback(unit, release_pending=True)
 
     elif isinstance(event, SessionUpdateEvent):
         err = service.handle_session_update(session_id, event)
@@ -480,6 +551,7 @@ async def _dispatch_client_event(
         # client-side playback owns the unheard tail, so there is no additional
         # server state to mutate.
         logger.debug("Accepted conversation.item.truncate for %s", event.item_id)
+        _stop_gated_playback(unit, release_pending=True)
 
     elif isinstance(event, ResponseCreateEvent):
         result = service.handle_response_create(session_id, event)
@@ -501,6 +573,7 @@ async def _dispatch_client_event(
         _flush_queue(unit.output_queue, preserve=_keep_cancel_bookkeeping)
         _flush_queue(unit.text_output_queue, preserve=_keep_user_text_event)
         transport.discard_pending_audio()
+        _stop_gated_playback(unit, release_pending=True)
         events = service.handle_response_cancel(session_id)
         if events:
             await send_correlated(events)
@@ -511,7 +584,10 @@ def create_app(
     pool: list[PipelineUnit],
     stop_event: ThreadingEvent,
     llm_proxy_config: LLMProxyConfig | None = None,
+    backchannel_config: BackchannelConfig | None = None,
 ) -> FastAPI:
+    backchannel_classifier = SystemOneClassifier(backchannel_config) if backchannel_config is not None else None
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # One send loop per pipeline unit; each polls its own queues and forwards
@@ -525,6 +601,11 @@ def create_app(
                 await task
             except asyncio.CancelledError:
                 pass
+        for unit in pool:
+            if unit.session is not None and unit.session.backchannel_gate is not None:
+                unit.session.backchannel_gate.close()
+        if backchannel_classifier is not None:
+            await backchannel_classifier.aclose()
         for unit in pool:
             sess = unit.session
             if sess is not None and sess.transport is not None:
@@ -547,6 +628,13 @@ def create_app(
         for unit in pool:
             if unit.session is None:
                 unit.session = SessionState(transport=transport)
+                if backchannel_config is not None and backchannel_classifier is not None:
+                    unit.session.backchannel_gate = BackchannelGate(
+                        backchannel_classifier,
+                        backchannel_config,
+                        speculative_turns=unit.service.speculative_turns,
+                        turn_latency_store=unit.service.turn_latency_store,
+                    )
                 return unit
         return None
 
@@ -835,6 +923,20 @@ def create_app(
                 session_id = session.session_id if session is not None else None
 
                 # Text events first (speech_started cancels active response).
+                if session is not None and session.backchannel_gate is not None:
+                    active_cfg = unit.service._state(session_id).runtime_config if session_id else None
+                    for released in session.backchannel_gate.poll(
+                        enabled=active_cfg is None or active_cfg.interrupt_response_enabled
+                    ):
+                        turns = unit.service.speculative_turns
+                        if (
+                            isinstance(released, SpeechStartedEvent)
+                            and turns is not None
+                            and not turns.is_latest(released.turn_id, released.turn_revision)
+                        ):
+                            continue
+                        await _handle_text_event(unit, transport, session_id, released)
+
                 try:
                     text_msg = None
                     parked_index = None
@@ -869,62 +971,13 @@ def create_app(
                         if session_id is not None and _response_key_is_obsolete(unit, session_id, response_key):
                             _discard_obsolete_response_key(unit, session_id, response_key)
                             continue
-                    is_speech_start = isinstance(text_msg, SpeechStartedEvent)
-
-                    was_in_response = False
-                    was_response_pending = False
-                    if is_speech_start and session_id:
-                        st = unit.service._state(session_id)
-                        was_in_response = st.in_response
-                        was_response_pending = st.response_pending
-
-                    if (
-                        transport is not None
-                        and isinstance(text_msg, PipelineEvent)
-                        and session is not None
-                        and session_id
-                    ):
-                        try:
-                            events = unit.service.dispatch_pipeline_event(session_id, text_msg)
-                        except TurnOutputHeld:
-                            # Resumed speech started after the hold check. Park
-                            # the event again in its original place.
-                            pending_items = session.pending_text_output_items
-                            pending_items.insert(len(pending_items) if parked_index is None else parked_index, text_msg)
-                            events = []
-                        if events:
-                            await transport.send_events(events)
-
-                    if isinstance(text_msg, SpeechStartedEvent) and session_id:
-                        active_cfg = unit.service._state(session_id).runtime_config
-                        interrupt_enabled = text_msg.interrupt_response and (
-                            active_cfg is None or active_cfg.interrupt_response_enabled
-                        )
-                        if interrupt_enabled and transport is not None:
-                            # Flush even when no response is active: the WebRTC
-                            # track can still hold unplayed audio from a response
-                            # whose done-sentinel was already observed —
-                            # finish_response() runs on the sentinel, not when
-                            # playback completes. No-op over WebSocket.
-                            transport.discard_pending_audio()
-                        if was_in_response or was_response_pending:
-                            if interrupt_enabled:
-                                unit.cancel_scope.cancel()
-                                unit.service.close_pending_responses(session_id)
-                                _flush_queue(unit.text_prompt_queue, preserve=_keep_pipeline_control)
-                                _flush_queue(unit.output_queue, preserve=_keep_cancel_bookkeeping)
-                                _flush_queue(unit.text_output_queue, preserve=_keep_user_text_event)
-                                if unit.response_playing.is_set():
-                                    unit.response_playing.clear()
-                                logger.info(
-                                    "Pipeline %d: speech during %s: cancelled, queue flushed",
-                                    unit.index,
-                                    "response" if was_in_response else "pending response",
-                                )
-                            else:
-                                logger.info(
-                                    f"Pipeline {unit.index}: speech during response: interrupt_response disabled, ignoring"
-                                )
+                    gate = session.backchannel_gate if session is not None else None
+                    held = False
+                    if gate is not None:
+                        active_cfg = unit.service._state(session_id).runtime_config if session_id else None
+                        held = gate.offer(text_msg, enabled=active_cfg is None or active_cfg.interrupt_response_enabled)
+                    if not held:
+                        await _handle_text_event(unit, transport, session_id, text_msg, parked_index=parked_index)
                 except Empty:
                     pass
 
@@ -977,6 +1030,8 @@ def create_app(
                                 session.pending_output_item = audio_chunk
                                 await asyncio.sleep(0.01)
                                 continue
+                            if isinstance(audio_chunk, AssistantOutputEvent) and session.backchannel_gate is not None:
+                                session.backchannel_gate.note_assistant_text(audio_chunk.text)
                             await transport.send_events(events)
                         continue
 
@@ -1136,6 +1191,8 @@ def create_app(
                             bytes(audio_batch),
                             response_key,
                         )
+                        if session is not None and session.backchannel_gate is not None:
+                            session.backchannel_gate.note_assistant_audio(len(audio_batch))
                 except Empty:
                     pass
 

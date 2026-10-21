@@ -56,10 +56,14 @@ def test_load_resolve_selection_defaults_and_independence(document):
 def test_configured_client_accepts_voice_choices(document):
     from speech_to_speech.configured_runtime import build_configured_client
 
-    document.data["runtime"] = {"client": {"voice": "Zoey", "voice_choices": ["Zoey", "Maeve"]}}
+    document.data["runtime"] = {
+        "client": {"voice": "Zoey", "voice_choices": ["Zoey", "Maeve"]},
+        "server": {"backchannel_url": "http://localhost:8093", "backchannel_threshold": 0.4},
+    }
     validate_config(document)
     client = build_configured_client(resolve_config(document, include_client=True))
     assert client.voice == "Zoey" and client.voice_choices == ["Zoey", "Maeve"]
+    assert resolve_config(document).runtime["server"]["backchannel_threshold"] == 0.4
 
 
 @pytest.mark.parametrize("names", [[], "primary", ["primary", "primary"], ["unknown"]])
@@ -461,7 +465,15 @@ def test_explicit_scope_inventory():
     }
     assert {"enable_visemes", "stv_model_name", "stv_device"} <= _MODULE_PIPELINE
     assert not _MODULE_PROCESS & _MODULE_PIPELINE
-    assert {f.name for f in fields(RealtimeServerArguments)} == {"host", "port"}
+    assert {f.name for f in fields(RealtimeServerArguments)} == {
+        "host",
+        "port",
+        "backchannel_url",
+        "backchannel_model",
+        "backchannel_threshold",
+        "backchannel_timeout_ms",
+        "backchannel_max_hold_ms",
+    }
     assert {f.name for f in fields(RealtimeAudioClientConfig)} == {
         "url",
         "model",
