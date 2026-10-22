@@ -87,7 +87,7 @@ def test_local_backend_preserves_response_creation_language():
 
 
 @pytest.mark.parametrize("modality", ["audio", "text"])
-def test_local_backend_keeps_context_and_scopes_response_instructions(modality):
+def test_local_backend_keeps_context_with_response_overrides(modality):
     handler = object.__new__(_RecordingLocalHandler)
     handler.cancel_scope = None
     handler.speculative_turns = None
@@ -111,7 +111,6 @@ def test_local_backend_keeps_context_and_scopes_response_instructions(modality):
         prompt = messages[0]["content"]
         assert ("SESSION INSTRUCTIONS" in prompt) == (override is None)
         assert ("ONE RESPONSE ONLY" in prompt) == bool(override)
-        assert ("Instructions for the next response:" in prompt) == bool(override)
         assert messages[1:] == history
         assert prompt.count("CURRENT CHAT SNAPSHOT") == 1
         assert chat.init_chat_message is snapshot

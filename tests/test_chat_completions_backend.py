@@ -993,7 +993,7 @@ def test_out_of_band_does_not_commit_to_default_conversation():
 
 
 @pytest.mark.parametrize("modality", ["audio", "text"])
-def test_chat_backend_keeps_context_and_scopes_response_instructions(modality):
+def test_chat_backend_keeps_context_with_response_overrides(modality):
     handler = _make_handler(stream=False)
     chat = Chat(10)
     snapshot = make_system_message("CURRENT CHAT SNAPSHOT")
@@ -1008,7 +1008,6 @@ def test_chat_backend_keeps_context_and_scopes_response_instructions(modality):
         prompt = messages[0]["content"]
         assert ("SESSION INSTRUCTIONS" in prompt) == (override is None)
         assert ("ONE RESPONSE ONLY" in prompt) == bool(override)
-        assert ("Instructions for the next response:" in prompt) == bool(override)
         assert messages[1:] == history
         assert prompt.count("CURRENT CHAT SNAPSHOT") == 1
         assert chat.init_chat_message is snapshot

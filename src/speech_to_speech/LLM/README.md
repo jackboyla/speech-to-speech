@@ -60,9 +60,11 @@ Speech recognition and synthesis stay local either way. With a hosted provider, 
 
 ### Responses without new user input
 
-Realtime `response.create` can request another reply after a completed assistant message. Some Chat Completions providers instead treat that last message as unfinished text to continue (assistant prefill), which can produce an empty completion. Configure the provider to start a new assistant message.
+Realtime `response.create` can request another reply after a completed assistant message. Some Chat Completions providers instead treat that last message as unfinished text to continue (assistant prefill), which can produce an empty completion.
 
-For llama.cpp, use [`--no-prefill-assistant`](https://github.com/ggml-org/llama.cpp/tree/master/tools/server#usage), as in the startup examples and Docker Compose configuration. For Ollama 0.40.6 using its llama.cpp runner, set `LLAMA_ARG_PREFILL_ASSISTANT=0` in the **Ollama server's environment** before starting it. Changing the speech-to-speech process's environment does not configure an already-running provider.
+To test fresh assistant generation with llama.cpp, use [`--no-prefill-assistant`](https://github.com/ggml-org/llama.cpp/tree/master/tools/server#usage). For Ollama 0.40.6 using its llama.cpp runner, set `LLAMA_ARG_PREFILL_ASSISTANT=0` in the **Ollama server's environment** before starting it. Changing the speech-to-speech process's environment does not configure an already-running provider.
+
+This is a provider-specific workaround, not a guarantee that response instructions will be followed. Some models still repeat the last answer or speak when instructed to remain silent after prefill is disabled. Check those behaviors with your model before adopting the setting.
 
 ## Language behavior
 
