@@ -178,6 +178,8 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
     usage, out-of-band handling and error termination.
     """
 
+    session_models: frozenset[str] = frozenset()
+
     # ── setup ─────────────────────────────────────────────────────────────────
 
     def setup(
@@ -201,11 +203,13 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
         audio_temperature: float = 0.0,
         audio_content_type: Literal["input_audio", "audio_url"] = "input_audio",
         audio_history_turns: int = 1,
+        session_models: Optional[str] = None,
         **_kwargs: Any,
     ) -> None:
         self.cancel_scope = cancel_scope
         self.speculative_turns = speculative_turns
         self.model_name = model_name
+        self.session_models = frozenset(m.strip() for m in (session_models or "").split(",") if m.strip())
         self.stream = stream
         self.stream_batch_sentences = max(1, stream_batch_sentences)
         self.enable_lang_prompt = enable_lang_prompt
@@ -328,6 +332,11 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
             yield from self._iter_stream_events(api_response)
         else:
             yield from self._iter_response_events(api_response)
+
+    def _session_model_kwargs(self, runtime_config: Any) -> dict[str, Any]:
+        """Use the session's ``model`` when it is one of the allowed session models."""
+        model = runtime_config.session.model
+        return {"model": model} if model in self.session_models else {}
 
     @abstractmethod
     def _build_optional_kwargs(self, req_tools: Any, req_tool_choice: Any) -> dict[str, Any]:
@@ -983,6 +992,7 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
         self._apply_config(active_chat, instructions, wants_audio, language_name=lang_name)
 
         optional_kwargs = self._build_audio_optional_kwargs(response, req_tools, req_tool_choice)
+        optional_kwargs.update(self._session_model_kwargs(runtime_config))
         input_history = None
         if request.audio is not None:
             audio_b64 = self._audio_to_wav_base64(request.audio, request.audio_sample_rate)
@@ -1100,6 +1110,7 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
         self._apply_config(active_chat, instructions, wants_audio, language_name=lang_name)
 
         optional_kwargs = self._build_optional_kwargs(req_tools, req_tool_choice)
+        optional_kwargs.update(self._session_model_kwargs(runtime_config))
 
         # CancelScope.is_stale(gen) is checked when the stream iterator advances; a
         # blocked read inside httpx cannot be aborted by cancel_scope.cancel() from
