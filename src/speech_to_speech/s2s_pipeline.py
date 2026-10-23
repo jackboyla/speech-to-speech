@@ -11,7 +11,7 @@ from queue import Queue
 from sys import modules, platform
 from threading import Event
 from types import FrameType
-from typing import Any, Literal, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Literal, Optional, Sequence
 
 import nltk
 import torch
@@ -58,15 +58,8 @@ from speech_to_speech.utils.thread_manager import ThreadManager
 from speech_to_speech.utils.utils import resolve_device
 from speech_to_speech.VAD.vad_handler import VADHandler
 
-# Ensure that the necessary NLTK resources are available
-try:
-    nltk.data.find("tokenizers/punkt_tab")
-except (LookupError, OSError):
-    nltk.download("punkt_tab")
-try:
-    nltk.data.find("taggers/averaged_perceptron_tagger_eng")
-except (LookupError, OSError):
-    nltk.download("averaged_perceptron_tagger_eng")
+if TYPE_CHECKING:
+    from speech_to_speech.api.openai_realtime.audio_client import RealtimeAudioClientConfig
 
 # caching allows ~50% compilation time reduction
 # see https://docs.google.com/document/d/1y5CRfMLdwEoF1nTk9q8qEu1mgMUuUtvhklPKJ2emLU8/edit#heading=h.o2asbxsrp1ma
@@ -395,6 +388,16 @@ def _build_handlers(
 ) -> list[Any]:
     """Build a handler chain: VAD → STT/AudioInput → LM → TTS."""
     from speech_to_speech.LLM.lm_output_processor import LMOutputProcessor
+
+    # Parsing and support reports must work without downloading runtime resources.
+    try:
+        nltk.data.find("tokenizers/punkt_tab")
+    except (LookupError, OSError):
+        nltk.download("punkt_tab")
+    try:
+        nltk.data.find("taggers/averaged_perceptron_tagger_eng")
+    except (LookupError, OSError):
+        nltk.download("averaged_perceptron_tagger_eng")
 
     vad = VADHandler(
         stop_event,
@@ -744,19 +747,34 @@ def build_pipeline(
     return ThreadManager(handlers)
 
 
-def build_local_pipeline(args: ParsedArguments, stop_event: Event) -> ThreadManager:
-    """Compose the canonical server and audio client over a forced loopback URL."""
-
-    from speech_to_speech.api.openai_realtime.audio_client import (
-        RealtimeAudioClient,
-        RealtimeAudioClientConfig,
-        load_realtime_tool_module,
-    )
+def build_local_client_config(args: ParsedArguments) -> "RealtimeAudioClientConfig":
+    """Resolve local audio settings without constructing handlers or loading tools."""
+    from speech_to_speech.api.openai_realtime.audio_client import RealtimeAudioClientConfig
 
     local_audio = args.local_audio_kwargs
     playback_buffer_ms = local_audio.local_audio_playback_buffer_ms
     if playback_buffer_ms is None:
         playback_buffer_ms = OPENAI_TTS_PLAYBACK_BUFFER_MS if args.tts_backend.name == "openai" else 0.0
+    return RealtimeAudioClientConfig(
+        url=f"ws://127.0.0.1:{args.realtime_server_kwargs.port}/v1/realtime",
+        api_key="local",
+        chunk_size=local_audio.local_audio_chunk_size,
+        playback_buffer_ms=playback_buffer_ms,
+        input_device=local_audio.local_audio_input_device,
+        output_device=local_audio.local_audio_output_device,
+        print_json=local_audio.local_audio_print_json,
+        verbose=local_audio.verbose,
+        block_mic_during_playback=local_audio.local_audio_block_mic_during_playback,
+    )
+
+
+def build_local_pipeline(args: ParsedArguments, stop_event: Event) -> ThreadManager:
+    """Compose the canonical server and audio client over a forced loopback URL."""
+
+    from speech_to_speech.api.openai_realtime.audio_client import RealtimeAudioClient, load_realtime_tool_module
+
+    client_config = build_local_client_config(args)
+    local_audio = args.local_audio_kwargs
     tools: list[dict[str, Any]] = []
     tool_executor = None
     tool_response_create = True
@@ -778,18 +796,10 @@ def build_local_pipeline(args: ParsedArguments, stop_event: Event) -> ThreadMana
                 break
     client = RealtimeAudioClient(
         stop_event,
-        RealtimeAudioClientConfig(
-            url=f"ws://127.0.0.1:{args.realtime_server_kwargs.port}/v1/realtime",
-            api_key="local",
+        replace(
+            client_config,
             voice=voice,
             voice_choices=voice_choices,
-            chunk_size=local_audio.local_audio_chunk_size,
-            playback_buffer_ms=playback_buffer_ms,
-            input_device=local_audio.local_audio_input_device,
-            output_device=local_audio.local_audio_output_device,
-            print_json=local_audio.local_audio_print_json,
-            verbose=local_audio.verbose,
-            block_mic_during_playback=local_audio.local_audio_block_mic_during_playback,
             tools=tools,
             tool_executor=tool_executor,
             tool_response_create=tool_response_create,

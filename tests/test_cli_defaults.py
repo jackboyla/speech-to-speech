@@ -882,3 +882,214 @@ def test_parse_arguments_preserves_kitten_backend_options():
 def test_parse_arguments_rejects_unsupported_kitten_device():
     with pytest.raises(SystemExit):
         parse_arguments(["--tts", "kitten", "--kitten_device", "cuda"])
+
+
+@pytest.mark.parametrize("command", ["local", "talk"])
+def test_audio_report_uses_command_settings_and_device_metadata_without_startup(command, monkeypatch, capsys):
+    queries = []
+
+    def query_devices(selected, kind):
+        queries.append((selected, kind))
+        return {
+            "index": 7 if kind == "input" else 3,
+            "name": f"Test {kind}",
+            "hostapi": 0,
+            "default_samplerate": 48000.0,
+            "max_input_channels": 2,
+            "max_output_channels": 2,
+            "default_low_input_latency": 0.01,
+            "default_high_input_latency": 0.1,
+            "default_low_output_latency": 0.02,
+            "default_high_output_latency": 0.2,
+            "private_field": "SECRET_DEVICE_DATA",
+        }
+
+    monkeypatch.setitem(
+        sys.modules,
+        "sounddevice",
+        SimpleNamespace(query_devices=query_devices, query_hostapis=lambda index: {"name": "Test API"}),
+    )
+    monkeypatch.setattr("speech_to_speech.s2s_pipeline.build_pipeline", lambda *a, **kw: pytest.fail("model startup"))
+    monkeypatch.setattr("speech_to_speech.cli.run_realtime_audio_client", lambda *a: pytest.fail("client startup"))
+    flags = (
+        [
+            "--device",
+            "cpu",
+            "--local_audio_input_device",
+            "7",
+            "--local_audio_chunk_size",
+            "0",
+            "--llm_backend",
+            "responses-api",
+            "--responses_api_api_key",
+            "SECRET_KEY",
+            "--responses_api_base_url",
+            "https://SECRET_HOST/v1",
+            "--init_chat_prompt",
+            "SECRET_PROMPT",
+            "--local_audio_tool_module",
+            "must_not_import_tools",
+        ]
+        if command == "local"
+        else [
+            "--input-device",
+            "7",
+            "--chunk-size",
+            "0",
+            "--send-rate",
+            "24000",
+            "--api-key",
+            "SECRET_KEY",
+            "--url",
+            "wss://SECRET_HOST/realtime",
+            "--instructions",
+            "SECRET_PROMPT",
+            "--tool-module",
+            "must_not_import_tools",
+        ]
+    )
+    monkeypatch.setattr(sys, "argv", ["speech-to-speech", "audio-report", command, *flags])
+    main()
+    output = capsys.readouterr().out
+    report = json.loads(output)
+    assert "SECRET" not in output
+    assert "must_not_import_tools" not in output
+    assert queries == [(7, "input"), (None, "output")]
+    audio = report["configured"]["audio_client"]
+    assert audio["input_device"] == 7
+    assert audio["output_device"] is None
+    assert audio["callback_block_size_frames"] == 0
+    assert audio["send_rate_hz"] == (16000 if command == "local" else 24000)
+    assert report["observed"]["audio_devices"]["input"]["default_samplerate"] == 48000
+    assert report["observed"]["audio_devices"]["output"]["host_api"] == "Test API"
+    assert "not opened" in report["observed"]["streams"]
+    assert "unavailable" in report["observed"]["microphone_overflows"]
+    assert report["versions"]["python"]
+    if command == "local":
+        backends = report["configured"]["backends"]
+        assert backends["stt"]["device"] == "cpu"
+        assert backends["tts"]["backend"] == "qwen3"
+        assert backends["tts"]["engine"] == "ggml"
+        assert backends["tts"]["device"] == "cpu"
+    else:
+        assert "unknown" in report["configured"]["backends"]
+
+
+def test_audio_report_yaml_reuses_selected_pipeline_and_local_client_defaults(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "config.yaml"
+    path.write_text("""schema_version: 1
+runtime:
+  client:
+    chunk_size: 2048
+    input_device: 7
+    tool_module: must_not_import_tools
+    api_key: SECRET_CLIENT_KEY
+blocks:
+  vad: {kind: vad, backend: silero}
+  stt: {kind: stt, backend: openai}
+  llm:
+    kind: llm
+    backend: chat-completions
+    settings: {responses_api_api_key: SECRET_KEY, init_chat_prompt: SECRET_PROMPT}
+  tts: {kind: tts, backend: openai}
+  other: {kind: tts, backend: qwen3}
+pipelines:
+  primary:
+    stages: {vad: vad, stt: stt, llm: llm, tts: other}
+  secondary:
+    stages: {vad: vad, stt: stt, llm: llm, tts: tts}
+""")
+    monkeypatch.setitem(sys.modules, "sounddevice", None)
+    monkeypatch.setattr(
+        "speech_to_speech.configured_runtime.run_configured_command", lambda *a: pytest.fail("runtime startup")
+    )
+    monkeypatch.setattr(
+        sys, "argv", ["speech-to-speech", "audio-report", "local", "-f", str(path), "--name", "secondary"]
+    )
+    main()
+    output = capsys.readouterr().out
+    report = json.loads(output)
+    assert "SECRET" not in output
+    assert "must_not_import_tools" not in output
+    assert str(path) not in output
+    assert report["configured"]["backends"]["tts"]["backend"] == "openai"
+    assert report["configured"]["backends"]["tts"]["sample_rate"] == 24000
+    assert report["configured"]["audio_client"]["playback_buffer_ms"] == 196
+    assert report["configured"]["audio_client"]["callback_block_size_frames"] == 2048
+    assert report["observed"]["audio_devices"]["status"].startswith("unavailable")
+
+
+def test_audio_report_device_failure_does_not_hide_other_device(monkeypatch, capsys):
+    class PortAudioError(Exception):
+        pass
+
+    def query_devices(selected, kind):
+        if kind == "input":
+            raise PortAudioError("SECRET_ERROR_DETAIL")
+        return dict.fromkeys(
+            [
+                "index",
+                "name",
+                "hostapi",
+                "default_samplerate",
+                "max_input_channels",
+                "max_output_channels",
+                "default_low_input_latency",
+                "default_high_input_latency",
+                "default_low_output_latency",
+                "default_high_output_latency",
+            ],
+            0,
+        )
+
+    monkeypatch.setitem(
+        sys.modules,
+        "sounddevice",
+        SimpleNamespace(
+            query_devices=query_devices,
+            query_hostapis=lambda index: {"name": "Test API"},
+            PortAudioError=PortAudioError,
+        ),
+    )
+    monkeypatch.setattr(sys, "argv", ["speech-to-speech", "audio-report", "talk"])
+    main()
+    output = capsys.readouterr().out
+    devices = json.loads(output)["observed"]["audio_devices"]
+    assert devices["input"]["status"].startswith("unavailable")
+    assert devices["output"]["host_api"] == "Test API"
+    assert "SECRET" not in output
+
+
+def test_audio_report_serve_does_not_query_audio_devices(monkeypatch, capsys):
+    monkeypatch.setitem(sys.modules, "sounddevice", SimpleNamespace())
+    monkeypatch.setattr(sys, "argv", ["speech-to-speech", "audio-report", "serve"])
+    main()
+    report = json.loads(capsys.readouterr().out)
+    assert "audio_client" not in report["configured"]
+    assert "not queried" in report["observed"]["audio_devices"]
+
+
+def test_audio_report_does_not_download_missing_nltk_resources():
+    import subprocess
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+import nltk
+nltk.data.path = []
+def blocked(*args, **kwargs):
+    raise AssertionError('audio-report must not download NLTK resources')
+nltk.download = blocked
+from speech_to_speech.cli import main
+sys.argv = ['speech-to-speech', 'audio-report', 'local']
+main()
+""",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["command"] == "local"

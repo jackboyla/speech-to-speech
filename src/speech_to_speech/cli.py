@@ -32,6 +32,9 @@ def _command_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("serve", add_help=False, help="Run the Realtime pipeline server.")
     subparsers.add_parser("talk", add_help=False, help="Connect microphone and speakers to a Realtime URL.")
     subparsers.add_parser("local", add_help=False, help="Run the server and audio client together over loopback.")
+    subparsers.add_parser(
+        "audio-report", add_help=False, help="Print a support report for a command without starting it."
+    )
     return parser
 
 
@@ -64,7 +67,7 @@ def _extract_legacy_mode(command_args: list[str], parser: argparse.ArgumentParse
     return mode, remaining
 
 
-def parse_command(argv: Sequence[str] | None = None) -> tuple[Command, list[str]]:
+def parse_command(argv: Sequence[str] | None = None) -> tuple[Command | Literal["audio-report"], list[str]]:
     """Split the top-level command from arguments owned by that command."""
 
     command_args = list(sys.argv[1:] if argv is None else argv)
@@ -74,7 +77,7 @@ def parse_command(argv: Sequence[str] | None = None) -> tuple[Command, list[str]
     if command_args[0] in {"-h", "--help"}:
         parser.print_help()
         raise SystemExit(0)
-    if command_args[0] not in {"serve", "talk", "local"}:
+    if command_args[0] not in {"serve", "talk", "local", "audio-report"}:
         legacy_mode, remaining = _extract_legacy_mode(command_args, parser)
         if legacy_mode is not None:
             legacy_command = _LEGACY_MODE_COMMANDS.get(legacy_mode)
@@ -90,12 +93,12 @@ def parse_command(argv: Sequence[str] | None = None) -> tuple[Command, list[str]
             )
             return legacy_command, remaining
     command = command_args[0]
-    if command not in {"serve", "talk", "local"}:
-        parser.error(f"unknown command {command!r}; choose serve, talk, or local")
+    if command not in {"serve", "talk", "local", "audio-report"}:
+        parser.error(f"unknown command {command!r}; choose serve, talk, local, or audio-report")
     return command, command_args[1:]  # type: ignore[return-value]
 
 
-def parse_talk_arguments(argv: Sequence[str]) -> RealtimeAudioClientConfig:
+def parse_talk_arguments(argv: Sequence[str], *, load_tools: bool = True) -> RealtimeAudioClientConfig:
     """Parse the lightweight audio client command."""
 
     defaults = RealtimeAudioClientConfig()
@@ -170,7 +173,7 @@ def parse_talk_arguments(argv: Sequence[str]) -> RealtimeAudioClientConfig:
     tools: list[dict[str, Any]] = []
     tool_executor = None
     tool_response_create = defaults.tool_response_create
-    if namespace.tool_module:
+    if namespace.tool_module and load_tools:
         tools, tool_executor, tool_response_create = load_realtime_tool_module(namespace.tool_module)
     return RealtimeAudioClientConfig(
         url=namespace.url,
@@ -196,7 +199,7 @@ def parse_talk_arguments(argv: Sequence[str]) -> RealtimeAudioClientConfig:
     )
 
 
-def _run_file_command(command: Command, command_args: list[str]) -> None:
+def _run_file_command(command: Command, command_args: list[str], *, audio_report: bool = False) -> None:
     from speech_to_speech.config import ConfigurationError, load_config, resolve_config
 
     parser = argparse.ArgumentParser(prog=f"speech-to-speech {command}", allow_abbrev=False, exit_on_error=False)
@@ -227,6 +230,14 @@ def _run_file_command(command: Command, command_args: list[str]) -> None:
             parser.error("serve and local require exactly one selected definition; use --name.")
     except (ConfigurationError, ImportError):
         parser.exit(2, "Configuration error: check the YAML file, selected names, and required environment settings.\n")
+    if audio_report:
+        from speech_to_speech.audio_diagnostics import print_configured_audio_report
+
+        try:
+            print_configured_audio_report(command, config)
+        except ConfigurationError:
+            parser.exit(2, "Configuration error: check the configured pipeline and client settings.\n")
+        return
     try:
         from speech_to_speech.configured_runtime import run_configured_command
 
@@ -239,18 +250,45 @@ def _run_file_command(command: Command, command_args: list[str]) -> None:
 
 def main() -> None:
     command, command_args = parse_command()
+    audio_report = command == "audio-report"
+    if audio_report:
+        parser = argparse.ArgumentParser(
+            prog="speech-to-speech audio-report",
+            description="Print a copyable audio support report without loading models, connecting, or recording.",
+        )
+        parser.add_argument("command", choices=("serve", "talk", "local"), help="Command to inspect.")
+        parser.add_argument(
+            "arguments", nargs=argparse.REMAINDER, help="The command's usual flags or YAML file options."
+        )
+        namespace = parser.parse_args(command_args)
+        command, command_args = namespace.command, namespace.arguments
+    assert command in {"serve", "talk", "local"}
     if any(
         argument.startswith("-f") or argument == "--file" or argument.startswith("--file=") for argument in command_args
     ):
-        _run_file_command(command, command_args)
+        _run_file_command(command, command_args, audio_report=audio_report)
         return
     if any(argument == "--name" or argument.startswith("--name=") for argument in command_args):
         _command_parser().error("--name requires a configuration file.")
     if command == "talk":
-        config = parse_talk_arguments(command_args)
+        config = parse_talk_arguments(command_args, load_tools=not audio_report)
+        if audio_report:
+            from speech_to_speech.audio_diagnostics import print_audio_report
+
+            print_audio_report(command, client=config)
+            return
         set_log_transcripts(config.log_transcripts)
         warn_if_log_transcripts_enabled()
         run_realtime_audio_client(config)
+        return
+
+    if audio_report:
+        from speech_to_speech.audio_diagnostics import print_audio_report
+        from speech_to_speech.s2s_pipeline import build_local_client_config, parse_arguments, prepare_all_args
+
+        args = parse_arguments(command_args, command=command)
+        prepare_all_args(args)
+        print_audio_report(command, args=args, client=build_local_client_config(args) if command == "local" else None)
         return
 
     from speech_to_speech.s2s_pipeline import run_pipeline_command

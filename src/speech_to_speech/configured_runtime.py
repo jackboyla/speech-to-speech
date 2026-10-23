@@ -109,7 +109,9 @@ def _adapt(config: ResolvedConfig) -> dict[str, ParsedArguments]:
     return adapted
 
 
-def build_configured_client(config: ResolvedConfig, *, local: bool = False) -> RealtimeAudioClientConfig:
+def build_configured_client(
+    config: ResolvedConfig, *, local: bool = False, load_tools: bool = True
+) -> RealtimeAudioClientConfig:
     """Build independent packaged client settings and load explicitly selected tools."""
     from speech_to_speech.api.openai_realtime.audio_client import (
         RealtimeAudioClientConfig,
@@ -146,14 +148,15 @@ def build_configured_client(config: ResolvedConfig, *, local: bool = False) -> R
         if not _explicit(config, "runtime", "client", "playback_buffer_ms"):
             pipeline = next(iter(config.pipelines.values()))
             settings["playback_buffer_ms"] = 196.0 if pipeline.stages["tts"].backend == "openai" else 0.0
-    if module:
+    if module and load_tools:
         tools, executor, create_response = load_realtime_tool_module(module)
         settings.update(tools=tools, tool_executor=executor)
         if not _explicit(config, "runtime", "client", "tool_response_create"):
             settings["tool_response_create"] = create_response
     try:
         client = RealtimeAudioClientConfig(**settings)
-        build_session_update(client)
+        if load_tools:
+            build_session_update(client)
     except ValueError:
         raise ConfigurationError("Invalid packaged client settings or tool contract.") from None
     return client
