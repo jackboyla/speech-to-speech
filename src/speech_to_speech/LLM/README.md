@@ -70,12 +70,12 @@ For Chat Completions, `--responses_api_instruction_only_format transcript` offer
 
 The option applies only to explicit, nonempty `response.instructions` when the selected history ends with a completed assistant message and contains text and completed tool exchanges. New user messages, tool-result turns, pending calls, media history, and omitted or cleared instructions keep the normal message format. The default is `messages`.
 
-A tested configuration uses [Gemma 4 E4B Q4_0](https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/blob/a69f018d7678a2b9f5e705f8903d6fb29b9b25dc/gemma-4-E4B-it-Q4_0.gguf) with llama.cpp **b10098** (`0278d836`), its bundled chat template, and reasoning enabled:
+A tested configuration uses [Gemma 4 E4B Q4_0](https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/blob/a69f018d7678a2b9f5e705f8903d6fb29b9b25dc/gemma-4-E4B-it-Q4_0.gguf) with llama.cpp **b10098** (`0278d836`), its bundled chat template, reasoning enabled, and greedy sampling:
 
 ```bash
 llama-server -m /path/to/gemma-4-E4B-it-Q4_0.gguf \
   --alias local-gemma --host 127.0.0.1 --port 19740 \
-  -ngl 99 -np 1 -c 8192 -t 4 -tb 4 -fa on \
+  -ngl 99 -np 1 -c 8192 -t 4 -tb 4 -fa on --temp 0 \
   --jinja --reasoning on --no-mmproj --no-cache-prompt --prefill-assistant
 ```
 
