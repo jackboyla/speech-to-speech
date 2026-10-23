@@ -21,6 +21,7 @@ import { S2sRealtimeClient, normalizePlaybackBufferMs } from "./s2s-realtime-cli
 import { $, truncateError, DEBUG } from "./ui/dom.js";
 import { ChatView } from "./ui/chat.js";
 import { Account } from "./ui/account.js";
+import { AudioSelfTest, supportsAudioOutputSelection } from "./ui/audio-self-test.js";
 
 const DEFAULT_VOICE = "Aiden";
 const DEFAULT_INSTRUCTIONS = "You are a friendly voice assistant.";
@@ -305,6 +306,19 @@ const settingsForm = /** @type {HTMLFormElement} */ (settingsModal.querySelector
 /** @type {AppState} */
 let currentState = "idle";
 let settings = loadSettings();
+const audioSelfTest = new AudioSelfTest({
+  micConstraints: () => ({ audio: {
+    ...MIC_CONSTRAINTS_BASE,
+    ...(inputAudioInput.value ? { deviceId: { exact: inputAudioInput.value } } : {}),
+  } }),
+  onMicReady: refreshAudioDeviceLists,
+});
+settingsModal.addEventListener("close", () => audioSelfTest.stop());
+settingsModal.addEventListener("cancel", () => audioSelfTest.stop());
+settingsForm.addEventListener("submit", () => audioSelfTest.stop());
+inputAudioInput.addEventListener("change", () => audioSelfTest.stop());
+inputAudioOutput.addEventListener("change", () => audioSelfTest.stop());
+window.addEventListener("pagehide", () => audioSelfTest.stop());
 
 // ── Connection target ────────────────────────────────────────────────────────
 // Three modes, decided by the deploy via /api/config:
@@ -441,6 +455,7 @@ function setState(next) {
   }
 
   updateRestartAvailability();
+  audioSelfTest.setAvailable((next === "idle" || next === "error") && !client && !micStream);
 }
 
 function updateRestartAvailability() {
@@ -473,6 +488,8 @@ function openSettings() {
   inputInstructions.value = settings.instructions;
   syncGateUi();
   updateRestartAvailability();
+  fillDeviceSelect(inputAudioInput, [], settings.audioInputId, "Microphone");
+  fillDeviceSelect(inputAudioOutput, [], settings.audioOutputId, "Speaker");
   void refreshAudioDeviceLists();
   settingsModal.showModal();
 }
@@ -1239,12 +1256,6 @@ function micConstraints() {
   return { audio };
 }
 
-/** True when Web Audio can route playback to a chosen output device. */
-function supportsAudioOutputSelection() {
-  const Ctx = window.AudioContext || /** @type {any} */ (window).webkitAudioContext;
-  return typeof Ctx?.prototype?.setSinkId === "function";
-}
-
 /**
  * Rebuild the mic/speaker <select>s from enumerateDevices. Labels are blank
  * until mic permission has been granted at least once.
@@ -1254,7 +1265,7 @@ async function refreshAudioDeviceLists() {
   inputAudioOutput.disabled = !canPickOutput;
   audioOutputHint.textContent = canPickOutput
     ? "Where assistant audio plays. Can change live while connected."
-    : "Speaker selection needs a browser with AudioContext.setSinkId (Chrome/Edge).";
+    : "This browser uses system default speakers for tests and conversations; output selection is unavailable.";
 
   /** @type {MediaDeviceInfo[]} */
   let devices = [];
@@ -1268,21 +1279,12 @@ async function refreshAudioDeviceLists() {
   const outputs = devices.filter((d) => d.kind === "audiooutput");
   const labelsReady = devices.some((d) => d.label);
 
-  fillDeviceSelect(inputAudioInput, inputs, settings.audioInputId, "Microphone");
-  fillDeviceSelect(inputAudioOutput, outputs, settings.audioOutputId, "Speaker");
+  fillDeviceSelect(inputAudioInput, inputs, inputAudioInput.value, "Microphone");
+  fillDeviceSelect(inputAudioOutput, outputs, inputAudioOutput.value, "Speaker");
 
-  if (!labelsReady) {
-    // Permission unlocks real device names; keep it quiet — user can tap Start
-    // or we unlock when they already connected once this session.
-    const hint = inputAudioInput.parentElement?.querySelector("small");
-    if (hint) {
-      hint.textContent =
-        "Allow microphone access (tap Start once) to see device names. Mic changes apply on Restart.";
-    }
-  } else {
-    const hint = inputAudioInput.parentElement?.querySelector("small");
-    if (hint) hint.textContent = "Applies on the next conversation (or Restart).";
-  }
+  $("#audio-input-hint").textContent = labelsReady
+    ? "Applies on the next conversation (or Restart)."
+    : "Test your microphone to allow access and see device names. Mic changes apply on Restart.";
 }
 
 /**
@@ -1292,7 +1294,7 @@ async function refreshAudioDeviceLists() {
  * @param {string} fallbackLabel
  */
 function fillDeviceSelect(select, devices, selectedId, fallbackLabel) {
-  const prev = selectedId || select.value || "";
+  const prev = selectedId;
   select.replaceChildren();
   const def = document.createElement("option");
   def.value = "";
@@ -1304,12 +1306,11 @@ function fillDeviceSelect(select, devices, selectedId, fallbackLabel) {
     opt.textContent = d.label || `${fallbackLabel} ${i + 1}`;
     select.appendChild(opt);
   });
-  // Keep a saved id even if it isn't currently listed (unplugged); browser
-  // will fall back via ideal constraints / setSinkId errors.
+  // Keep an unplugged selection visible so the user can replace or test it.
   if (prev && ![...select.options].some((o) => o.value === prev)) {
     const missing = document.createElement("option");
     missing.value = prev;
-    missing.textContent = `${fallbackLabel} (saved, not found)`;
+    missing.textContent = `${fallbackLabel} (not found)`;
     select.appendChild(missing);
   }
   select.value = prev;
@@ -1318,7 +1319,10 @@ function fillDeviceSelect(select, devices, selectedId, fallbackLabel) {
 
 if (navigator.mediaDevices?.addEventListener) {
   navigator.mediaDevices.addEventListener("devicechange", () => {
-    if (settingsModal.open) void refreshAudioDeviceLists();
+    if (settingsModal.open) {
+      audioSelfTest.stop("Audio devices changed. Choose a device and test again.");
+      void refreshAudioDeviceLists();
+    }
   });
 }
 
@@ -1387,6 +1391,7 @@ function stopJoinCountdown() {
  * @param {AudioContext | null} [audioContext]
  */
 async function doStart(audioContext = null) {
+  audioSelfTest.stop();
   const transport = effectiveTransport();
   // Resolve the target before touching mic/audio so a misconfiguration (e.g.
   // direct mode with no URL) fails fast with a clear message. Over WebRTC the

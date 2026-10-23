@@ -1393,13 +1393,15 @@ body.cam-on .footer {
   font-weight: 500;
   color: var(--text-dim);
 }
-.field > span {
+.field > span,
+.field > label {
   color: var(--text);
   font-weight: 600;
   font-size: 12px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+#mic-test-meter { width: 100%; }
 .field input,
 .field select,
 .field textarea {

@@ -273,23 +273,29 @@
               </label>
             </div>
 
-            <label class="field">
-              <span>Microphone</span>
+            <div class="field">
+              <label for="audio-input">Microphone</label>
               <select id="audio-input">
                 <option value="">System default</option>
               </select>
-              <small>Applies on the next conversation (or Restart).</small>
-            </label>
+              <small id="audio-input-hint">Test your microphone to allow access and see device names.</small>
+              <button id="test-microphone" type="button" class="btn">Test microphone</button>
+              <meter id="mic-test-meter" min="-66" max="0" value="-66" aria-label="Microphone input level" aria-describedby="audio-test-status"></meter>
+            </div>
 
-            <label class="field" id="audio-output-field">
-              <span>Speakers</span>
+            <div class="field" id="audio-output-field">
+              <label for="audio-output">Speakers</label>
               <select id="audio-output">
                 <option value="">System default</option>
               </select>
               <small id="audio-output-hint">
                 Where assistant audio plays. Chrome/Edge support switching outputs.
               </small>
-            </label>
+              <button id="test-speakers" type="button" class="btn">Test speakers</button>
+            </div>
+            <div class="field">
+              <small id="audio-test-status" role="status">Tests run locally. No server connection needed.</small>
+            </div>
 
             <label class="field">
               <span>Faster interruptions</span>
