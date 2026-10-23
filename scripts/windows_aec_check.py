@@ -28,7 +28,7 @@ from speech_to_speech.api.openai_realtime.audio_client import (
 )
 
 RATE = 16000
-SOURCE_REVISION = "90e30e266eacf862eefc29fd32d4855717d74297"
+SOURCE_REVISION = "64c6bb64c0ef947488e816e6c12edbd7d3f55c4e"
 
 
 def level(audio: np.ndarray) -> float:
@@ -149,7 +149,6 @@ def main() -> int:
     )
     report = {
         "source_base_revision": SOURCE_REVISION,
-        "source_patch": "Treat closed Windows error pipes as worker failure, including repeated failure observers.",
         "bundle_revision": os.environ.get("AEC_BUNDLE_REVISION"),
         "platform": platform.platform(),
         "python": sys.version,
