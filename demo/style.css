@@ -1867,6 +1867,20 @@ body.cam-on .footer {
 .chat-history::-webkit-scrollbar-track { background: transparent; }
 .chat-history::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
 
+.chat-export {
+  flex: none;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+.chat-export .btn { min-height: 44px; }
+.chat-export p {
+  margin: 8px 0 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+#chat-copy-status:empty { display: none; }
+
 .chat-empty {
   flex: 1;
   display: flex;

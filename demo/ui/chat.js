@@ -39,6 +39,10 @@ export class ChatView {
     this._chatPanelClose = $("#chat-panel-close");
     /** @type {HTMLDivElement} */
     this._chatHistory = $("#chat-history");
+    /** @type {HTMLButtonElement} */
+    this._copyBtn = $("#chat-copy");
+    /** @type {HTMLParagraphElement} */
+    this._copyStatus = $("#chat-copy-status");
     /** @type {HTMLDivElement} */
     this._bubbleStack = $("#bubble-stack");
 
@@ -83,6 +87,7 @@ export class ChatView {
     this._chatBtn.addEventListener("click", () => (this._panelOpen ? this._closePanel() : this._openPanel()));
     this._chatPanelClose.addEventListener("click", () => this._closePanel());
     this._chatPanelBackdrop.addEventListener("click", () => this._closePanel());
+    this._copyBtn.addEventListener("click", () => this._copyConversation());
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && this._panelOpen) this._closePanel();
     });
@@ -295,9 +300,37 @@ export class ChatView {
 
   // ── History ───────────────────────────────────────────────────────────────
 
+  async _copyConversation() {
+    const text = [...this._chatHistory.querySelectorAll(".hist-msg.user, .hist-msg.assistant")]
+      .map((row) => {
+        const body = row.querySelector(".hist-body")?.textContent || "";
+        if (!body.trim()) return "";
+        const role = row.querySelector(".hist-role")?.textContent;
+        const note = row.querySelector(".hist-note")?.textContent;
+        return `${role}${note ? ` (${note})` : ""}:\n${body}`;
+      })
+      .filter(Boolean)
+      .join("\n\n");
+    if (!text) {
+      this._copyStatus.textContent = "No conversation text to copy yet.";
+      return;
+    }
+    this._copyBtn.disabled = true;
+    this._copyStatus.textContent = "";
+    try {
+      await navigator.clipboard.writeText(text);
+      this._copyStatus.textContent = "Conversation text copied.";
+    } catch {
+      this._copyStatus.textContent = "Could not copy. Select the message text and copy it manually.";
+    } finally {
+      this._copyBtn.disabled = false;
+    }
+  }
+
   /** Render the empty-state placeholder into the history panel. */
   renderEmptyState() {
     this._chatHistory.innerHTML = EMPTY_STATE_HTML;
+    this._copyStatus.textContent = "";
   }
 
   /** Reset the panel to the empty state and clear the unread badge. */

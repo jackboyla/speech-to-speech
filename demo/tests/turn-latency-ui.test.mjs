@@ -13,7 +13,7 @@ const timing = {
   hold_s: 0, smart_status: "incomplete",
 };
 
-test("history shows per-response server timings on desktop and phone", async (t) => {
+test("history shows timings and copies current message text on desktop and phone", async (t) => {
   const server = createServer(async (req, res) => {
     const name = new URL(req.url, "http://localhost").pathname;
     const file = path.resolve(root, `.${name === "/" ? "/index.html" : name}`);
@@ -31,7 +31,7 @@ test("history shows per-response server timings on desktop and phone", async (t)
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
   for (const width of [1280, 360]) {
-    const page = await browser.newPage({ viewport: { width, height: 850 }, reducedMotion: "reduce" });
+    const page = await browser.newPage({ viewport: { width, height: 850 }, reducedMotion: "reduce", permissions: ["clipboard-read", "clipboard-write"] });
     await page.route("https://**/*", (route) => route.abort());
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.evaluate(async (timing) => {
@@ -46,12 +46,37 @@ test("history shows per-response server timings on desktop and phone", async (t)
           "speech_to_speech.turn_latency": JSON.stringify(timing),
         } : {}, output: [] },
       });
-      chat.onTranscript({ role: "assistant", text: "The sky looks blue because air scatters blue light more strongly.", partial: false, responseId: "r1" });
-      finish("r1", timing);
+      chat.renderEmptyState();
       chat._openPanel();
     }, timing);
     await page.evaluate(() => document.querySelector(".chat-panel-inner").getAnimations().forEach((animation) => animation.finish()));
-    assert.equal(await page.locator(".hist-msg.assistant").count(), 1);
+    const copy = page.getByRole("button", { name: "Copy conversation", exact: true });
+    const copyStatus = page.locator("#chat-copy-status");
+    await page.evaluate(() => navigator.clipboard.writeText("keep existing clipboard"));
+    await copy.click({ timeout: 2000 });
+    assert.equal(await copyStatus.textContent(), "No conversation text to copy yet.");
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "keep existing clipboard");
+    await page.evaluate((timing) => {
+      chat.onTranscript({ role: "user", text: "Why is the sky", partial: true, itemId: "u1" });
+      chat.onTranscript({ role: "assistant", text: "The sky looks blue because air scatters blue light more strongly.", partial: false, responseId: "r1" });
+      finish("r1", timing);
+    }, timing);
+    await copy.click();
+    await page.waitForFunction(() => document.querySelector("#chat-copy-status").textContent === "Conversation text copied.");
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()),
+      "You:\nWhy is the sky\n\nAssistant:\nThe sky looks blue because air scatters blue light more strongly.");
+    await page.evaluate(() => {
+      chat.onTranscript({ role: "user", text: "Why is the sky blue?\n<café> & clouds ☁", partial: false, itemId: "u1" });
+      chat.onTranscript({ role: "assistant", text: "Checking", partial: true, responseId: "stream" });
+    });
+    await copy.click();
+    assert.match(await page.evaluate(() => navigator.clipboard.readText()), /Assistant:\nChecking$/);
+    await page.evaluate(() => chat.onTranscript({ role: "assistant", text: "Checking the latest answer…", partial: true, responseId: "stream" }));
+    await copy.click();
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()),
+      "You:\nWhy is the sky blue?\n<café> & clouds ☁\n\nAssistant:\nThe sky looks blue because air scatters blue light more strongly.\n\nAssistant:\nChecking the latest answer…");
+    assert.equal(await copy.getAttribute("aria-describedby"), "chat-copy-hint");
+    assert.equal(await page.locator(".hist-msg.assistant").count(), 2);
     const summary = page.locator(".hist-timings summary").first();
     assert.match(await summary.textContent(), /E2E 1.61 s/);
     await summary.focus();
@@ -86,7 +111,30 @@ test("history shows per-response server timings on desktop and phone", async (t)
     assert.equal(await page.locator(".hist-note").textContent(), "Interrupted");
     assert.equal(await page.locator(".hist-msg.assistant").last().locator(".hist-timings").count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.evaluate(() => {
+      chat.onToolResult("web_search", '{"query":"sky"}', "tool output", "data:image/png;base64,");
+      chat.onUserAudio({ itemId: "audio-only", audio: new Blob([], { type: "audio/wav" }) });
+    });
+    await copy.click();
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    assert.match(copied, /Assistant \(Interrupted\):\nChecking that for you…/);
+    assert.doesNotMatch(copied, /Server timings|Audio sent|web_search|tool output|data:image/);
+    assert.equal(copied.split("You:").length - 1, 1);
+    const copyBox = await copy.boundingBox();
+    assert.ok(copyBox.x >= 0 && copyBox.x + copyBox.width <= width && copyBox.height >= 44);
+    await page.evaluate(() => {
+      navigator.clipboard.writeText = async () => { throw new DOMException("Blocked", "NotAllowedError"); };
+    });
+    await copy.click();
+    await page.waitForFunction(() => document.querySelector("#chat-copy-status").textContent.includes("Could not copy"));
+    assert.match(await copyStatus.textContent(), /Select the message text and copy it manually/);
+    await page.evaluate(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined }));
+    await copy.click();
+    assert.match(await copyStatus.textContent(), /Could not copy/);
     await page.evaluate(() => { chat.clear(); chat.reset(); });
+    assert.equal(await copyStatus.textContent(), "");
+    await copy.click();
+    assert.equal(await copyStatus.textContent(), "No conversation text to copy yet.");
     assert.equal(await page.locator(".hist-timings").count(), 0);
     await page.close();
   }
