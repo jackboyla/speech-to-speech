@@ -765,6 +765,60 @@ def test_file_cli_rejects_invalid_and_mixed_flags(extra, configured_cli, monkeyp
     assert "SECRET_MARKER" not in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "original, replacement, diagnostic",
+    [
+        (
+            "  llm: {kind: llm, backend: chat-completions}",
+            "  llm:\n    kind: llm\n    backend: chat-completions\n    settings:\n      api_key: SECRET_MARKER",
+            ":9:7: blocks.llm.settings: Unknown field; use only documented fields.",
+        ),
+        (
+            "schema_version: 1",
+            "password: SECRET_MARKER\ninvalid: [",
+            ":4:6: Invalid YAML; correct the syntax and use one document.",
+        ),
+        (
+            "schema_version: 1",
+            "schema_version: 1\nruntime:\n  server:\n    port: {env: CONFIG_TEST_PORT}",
+            ":4:11: runtime.server.port: Environment value has an invalid scalar type; collections must use YAML.",
+        ),
+    ],
+)
+def test_file_cli_reports_sanitized_diagnostic(original, replacement, diagnostic, configured_cli, monkeypatch, capsys):
+    path, calls = configured_cli
+    path.write_text(path.read_text().replace(original, replacement))
+    monkeypatch.setenv("CONFIG_TEST_PORT", "SECRET_MARKER")
+    monkeypatch.setattr(sys, "argv", ["speech-to-speech", "serve", "-f", str(path), "--name", "primary"])
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 2
+    assert calls == []
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == f"Configuration error: {path}{diagnostic}\n"
+    assert "SECRET_MARKER" not in output.err
+
+
+def test_file_cli_hides_import_error(configured_cli, monkeypatch, capsys):
+    import speech_to_speech.config as config
+
+    path, calls = configured_cli
+
+    def fail(*_args, **_kwargs):
+        raise ImportError("SECRET_MARKER")
+
+    monkeypatch.setattr(config, "resolve_config", fail)
+    monkeypatch.setattr(sys, "argv", ["speech-to-speech", "serve", "-f", str(path), "--name", "primary"])
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 2
+    assert calls == []
+    assert capsys.readouterr().err == (
+        "Configuration error: check the YAML file, selected names, and required environment settings.\n"
+    )
+
+
 def test_file_talk_rejects_name(configured_cli, monkeypatch):
     path, calls = configured_cli
     monkeypatch.setattr(sys, "argv", ["speech-to-speech", "talk", "-f", str(path), "--name", "primary"])

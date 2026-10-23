@@ -225,7 +225,9 @@ def _run_file_command(command: Command, command_args: list[str]) -> None:
         )
         if command != "talk" and len(config.pipelines) != 1:
             parser.error("serve and local require exactly one selected definition; use --name.")
-    except (ConfigurationError, ImportError):
+    except ConfigurationError as exc:
+        parser.exit(2, f"Configuration error: {exc}\n")
+    except ImportError:
         parser.exit(2, "Configuration error: check the YAML file, selected names, and required environment settings.\n")
     try:
         from speech_to_speech.configured_runtime import run_configured_command
