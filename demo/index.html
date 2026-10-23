@@ -133,6 +133,14 @@
         <p id="circle-caption" class="circle-caption" role="status">Tap to start</p>
         <p id="circle-subcaption" class="circle-subcaption" hidden></p>
 
+        <div id="recoverable-error" class="recoverable-error" hidden>
+          <p aria-hidden="true"></p>
+          <details>
+            <summary>Technical details</summary>
+            <pre></pre>
+          </details>
+        </div>
+
         <div id="queue-actions" class="queue-actions" hidden>
           <button id="join-queue-btn" class="join-queue-btn" type="button" hidden>
             Join now
@@ -150,6 +158,8 @@
         </span>
       </footer>
     </div>
+
+    <p id="recoverable-announcement" class="recoverable-announcement" role="status" aria-atomic="true"></p>
 
     <!-- Ephemeral chat bubbles anchored to the top-right -->
     <div id="bubble-stack" class="bubble-stack" aria-live="polite" aria-atomic="false"></div>

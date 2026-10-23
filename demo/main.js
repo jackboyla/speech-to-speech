@@ -205,6 +205,10 @@ const circleBtn = $("#main-circle");
 const circleCaption = $("#circle-caption");
 /** @type {HTMLParagraphElement} */
 const circleSubcaption = $("#circle-subcaption");
+const recoverableError = $("#recoverable-error");
+const recoverableAnnouncement = $("#recoverable-announcement");
+/** @type {HTMLDetailsElement} */
+const recoverableDetails = $("#recoverable-error details");
 /** @type {HTMLElement} */
 const orbWrap = $(".orb-wrap");
 /** @type {HTMLButtonElement} */
@@ -1509,11 +1513,9 @@ async function doStart(audioContext = null) {
     void onFatalError(detail.error);
   });
   c.addEventListener("server-error", (e) => {
-    // Non-fatal: the backend reported an error mid-session. Log it, keep the
-    // socket and the conversation alive (the model can recover on its own).
-    const detail = /** @type {CustomEvent<{ error: unknown }>} */ (e).detail;
-    const msg = detail.error instanceof Error ? detail.error.message : String(detail.error);
-    console.warn("[main] server error (non-fatal):", msg);
+    if (client !== c) return;
+    const detail = /** @type {CustomEvent<import("./s2s-realtime-client.js").ServerErrorDetail>} */ (e).detail;
+    showRecoverableError(detail);
   });
   c.addEventListener("session", (e) => {
     const info = /** @type {CustomEvent<{ info: import("./s2s-realtime-client.js").SessionInfo }>} */ (e).detail.info;
@@ -1658,7 +1660,31 @@ function onClientStatus(status) {
   }
 }
 
+/** @param {import("./s2s-realtime-client.js").ServerErrorDetail} detail */
+function showRecoverableError({ error, eventType }) {
+  const message =
+    eventType === "conversation.item.input_audio_transcription.failed"
+      ? "Couldn't transcribe that—please try again."
+      : "The server couldn't complete a request. You can keep talking.";
+  $("#recoverable-error p").textContent = message;
+  recoverableAnnouncement.textContent = message;
+  // Provider messages, URLs and unknown identifiers may contain credentials.
+  const safeIdentifiers = new Set([
+    "transcription_failed", "transcription_error", "invalid_request_error",
+    "server_error", "input_audio_buffer_commit_empty", "conversation_already_has_active_response",
+  ]);
+  const lines = [`Event: ${eventType}`];
+  if (safeIdentifiers.has(error.type ?? "")) lines.push(`Type: ${error.type}`);
+  if (safeIdentifiers.has(error.code ?? "")) lines.push(`Code: ${error.code}`);
+  $("#recoverable-error pre").textContent = lines.join("\n");
+  recoverableDetails.open = false;
+  recoverableError.hidden = false;
+}
+
 async function teardown() {
+  recoverableError.hidden = true;
+  recoverableAnnouncement.textContent = "";
+  recoverableDetails.open = false;
   stopHeartbeat();
   stopJoinCountdown();
   endTrackedSession();

@@ -25,6 +25,7 @@
  * @property {boolean} [limited]
  * @property {number} [heartbeatSec]
  * @property {number} [remainingSec]
+ * @typedef {{ error: Error & { code?: string; type?: string }; eventType: string }} ServerErrorDetail
  * @typedef {Object} ClientOptions
  * @property {TransportKind} transport
  * @property {string} [sessionUrl]
@@ -554,7 +555,7 @@ export class S2sRealtimeClient extends EventTarget {
 
   /** @param {any} event */
   _onTransportEvent(event) {
-    if (this.options.transport === "websocket" && (this._closed || this._status === "error")) return;
+    if (this._closed || this._status === "error") return;
     const type = event?.type;
     if (typeof type !== "string") return;
     if (this._debug) console.debug(`[${this.options.transport}]`, event);
@@ -679,7 +680,10 @@ export class S2sRealtimeClient extends EventTarget {
           this._setStatus("connected");
         }
         const message = event.error?.message ?? "Input audio transcription failed";
-        this.dispatchEvent(new CustomEvent("server-error", { detail: { error: new Error(message) } }));
+        this.dispatchEvent(new CustomEvent("server-error", { detail: {
+          error: codedError(message, event.error?.code ?? "", { type: event.error?.type }),
+          eventType: event.type,
+        } }));
         break;
       }
       case "response.audio_transcript.delta":
@@ -732,7 +736,10 @@ export class S2sRealtimeClient extends EventTarget {
       }
       case "error": {
         const message = event.error?.message ?? "Server error";
-        this.dispatchEvent(new CustomEvent("server-error", { detail: { error: new Error(message) } }));
+        this.dispatchEvent(new CustomEvent("server-error", { detail: {
+          error: codedError(message, event.error?.code ?? "", { type: event.error?.type }),
+          eventType: event.type,
+        } }));
         break;
       }
     }

@@ -65,20 +65,22 @@ test("a current transcription failure clears its item and resumes listening", ()
   const statuses = [];
   const errors = [];
   client.addEventListener("status", (event) => statuses.push(event.detail.status));
-  client.addEventListener("server-error", (event) => errors.push(event.detail.error.message));
+  client.addEventListener("server-error", (event) => errors.push(event.detail));
 
   client._onTransportEvent({
     type: "conversation.item.input_audio_transcription.failed",
     item_id: "item-current",
     content_index: 0,
-    error: { message: "transcription request timed out" },
+    error: { type: "transcription_error", code: "transcription_failed", message: "transcription request timed out" },
   });
 
   assert.equal(client.status, "connected");
   assert.equal(client._currentUserItemId, "");
   assert.equal(client._userTranscriptByItem.has("item-current"), false);
   assert.deepEqual(statuses, ["connected"]);
-  assert.deepEqual(errors, ["transcription request timed out"]);
+  assert.equal(errors[0].error.message, "transcription request timed out");
+  assert.equal(errors[0].error.code, "transcription_failed");
+  assert.equal(errors[0].eventType, "conversation.item.input_audio_transcription.failed");
 });
 
 test("an older transcription failure does not reset the current item", () => {
