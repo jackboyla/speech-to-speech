@@ -307,6 +307,10 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
         """Serialise the chat to the backend's request payload (input/messages)."""
         ...
 
+    def _serialize_request(self, active_chat: Chat, response: Any) -> Any:
+        """Serialize history for the current response request."""
+        return self._serialize(active_chat)
+
     @abstractmethod
     def _request(self, api_input: Any, optional_kwargs: dict[str, Any]) -> Any:
         """Issue the create() call and return the response or stream."""
@@ -782,7 +786,11 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
         try:
             generation_started_at_s = perf_counter()
             try:
-                api_input = (serialize_fn or self._serialize)(active_chat)
+                api_input = (
+                    serialize_fn(active_chat)
+                    if serialize_fn is not None
+                    else self._serialize_request(active_chat, turn.response)
+                )
                 # Images the model actually sees this turn; only these are stripped on
                 # write-back, so an image a fast client injects mid-generation for the
                 # next turn survives (it is not in this serialized snapshot).

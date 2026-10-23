@@ -137,7 +137,7 @@ character count, tool-call count, and token usage. Tool-only responses do not
 trigger this warning. The `Response done` log maps `response_key` to the client's
 response ID.
 
-For replies without new user input, check the [provider's assistant-prefill setting](../../LLM/README.md#responses-without-new-user-input).
+For replies without new user input, see [assistant prefill and the opt-in transcript format](../../LLM/README.md#responses-without-new-user-input).
 
 To inspect the effective instructions, history, and tool settings for a synthetic
 reproduction, use `--log_level debug --log_transcripts`. Match the `LLM request`

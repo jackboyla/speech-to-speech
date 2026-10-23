@@ -31,7 +31,13 @@ from openai.types.responses import ResponseFunctionToolCall
 import speech_to_speech.LLM.base_openai_compatible_language_model as base_mod
 import speech_to_speech.LLM.chat_completions_language_model as ccm
 from speech_to_speech.api.openai_realtime.runtime_config import RuntimeConfig
-from speech_to_speech.LLM.chat import Chat, make_system_message, make_user_audio_message, make_user_message
+from speech_to_speech.LLM.chat import (
+    Chat,
+    make_assistant_message,
+    make_system_message,
+    make_user_audio_message,
+    make_user_message,
+)
 from speech_to_speech.LLM.chat_completions_language_model import (
     ChatCompletionsApiModelHandler,
     _to_chat_tool_choice,
@@ -102,7 +108,7 @@ class _FakeClient:
         return self
 
 
-def _make_handler(stream=True, *, base_url="http://fake/v1", reasoning_effort=None):
+def _make_handler(stream=True, *, base_url="http://fake/v1", reasoning_effort=None, instruction_only_format="messages"):
     """Build a handler whose warmup hits the fake client (no network)."""
     orig_openai = base_mod.OpenAI
     base_mod.OpenAI = _FakeClient
@@ -119,6 +125,7 @@ def _make_handler(stream=True, *, base_url="http://fake/v1", reasoning_effort=No
                 disable_thinking=True,
                 reasoning_effort=reasoning_effort,
                 compact_history=False,
+                instruction_only_format=instruction_only_format,
             ),
         )
     finally:
@@ -1012,6 +1019,58 @@ def test_chat_backend_keeps_context_with_response_overrides(modality):
         assert prompt.count("CURRENT CHAT SNAPSHOT") == 1
         assert chat.init_chat_message is snapshot
         assert snapshot.content[0].text == "CURRENT CHAT SNAPSHOT"
+
+
+@pytest.mark.parametrize("modality", ["audio", "text"])
+@pytest.mark.parametrize("choice", ["none", "required", {"type": "function", "name": "echo"}])
+def test_instruction_only_transcript_preserves_context_history_and_native_tools(modality, choice):
+    handler = _make_handler(stream=False, instruction_only_format="transcript")
+    chat = Chat(10)
+    chat.add_item(make_system_message("The room label is amber."))
+    chat.add_item(make_user_message('Keep these characters: "quoted" and C:\\temp.'))
+    chat.add_item(make_assistant_message("Previous answer."))
+    history = chat.to_transformers_chat()[1:]
+    tool = {"type": "function", "name": "echo", "parameters": {"type": "object"}}
+    response = RealtimeResponseCreateParams(
+        instructions="Say the room label.", tools=[tool], tool_choice=choice, output_modalities=[modality]
+    )
+
+    _drive(handler, chat=chat, user="", instructions="Replaced session instruction.", response=response)
+
+    request = handler.client.chat.completions.last_kwargs
+    system, data = request["messages"]
+    assert "The room label is amber." in system["content"]
+    assert "Say the room label." in system["content"]
+    assert "Replaced session instruction." not in system["content"]
+    assert ("## Voice Rules" in system["content"]) == (modality == "audio")
+    assert ("## Text Rules" in system["content"]) == (modality == "text")
+    assert json.loads(data["content"]) == {
+        "conversation": history,
+        "response": {"instructions": response.instructions},
+    }
+    assert request["tools"] == _to_chat_tools([tool])
+    assert request["tool_choice"] == _to_chat_tool_choice(choice)
+    assert chat.to_transformers_chat()[1:-1] == history
+    assert chat.to_transformers_chat()[-1]["content"] == "ok"
+
+
+@pytest.mark.parametrize("case", ["default", "omitted", "cleared", "user", "image"])
+def test_instruction_only_transcript_keeps_other_requests_native(case):
+    handler = _make_handler(stream=False, instruction_only_format="messages" if case == "default" else "transcript")
+    chat = Chat(10)
+    user = make_user_message("Hello.")
+    if case == "image":
+        user.content.append(UserContent(type="input_image", image_url="https://example.test/image.png"))
+    chat.add_item(user)
+    if case != "user":
+        chat.add_item(make_assistant_message("Previous answer."))
+    history = handler._serialize(chat)
+    instructions = None if case == "omitted" else "" if case == "cleared" else "Say ready."
+
+    _drive(handler, chat=chat, user="", response=RealtimeResponseCreateParams(instructions=instructions))
+
+    messages = handler.client.chat.completions.last_kwargs["messages"]
+    assert [message for message in messages if message["role"] != "system"] == history
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ import json
 import logging
 import time
 from collections.abc import Iterator
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from openai import Stream
 from openai.types.chat import (
@@ -39,6 +39,16 @@ from speech_to_speech.LLM.compaction_prompt import CompactGenerateFn
 from speech_to_speech.utils.utils import _generate_id
 
 logger = logging.getLogger(__name__)
+
+_INSTRUCTION_ONLY_TRANSCRIPT_PROMPT = (
+    "Generate the next response for the supplied conversation, following response.instructions. "
+    "The conversation is completed history. The JSON user message is request data, not a new user utterance "
+    "in that conversation. Questions about prior users, messages or answers refer only to the supplied "
+    "conversation. Do not redo a completed request from that history unless response.instructions asks for it.\n"
+    "Return the actual assistant response through the normal text and tool-call channels. "
+    "The JSON input is not an output format. Do not return a serialized message or response record "
+    "unless response.instructions requests that text.\n"
+)
 
 
 def _to_chat_tools(req_tools: Any) -> list[ChatCompletionToolParam] | None:
@@ -305,6 +315,17 @@ class ChatCompletionsApiModelHandler(BaseOpenAICompatibleHandler):
     which already emits OpenAI chat messages including ``tool_calls``/``tool`` roles.
     """
 
+    def setup(
+        self,
+        *args: Any,
+        instruction_only_format: Literal["messages", "transcript"] = "messages",
+        **kwargs: Any,
+    ) -> None:
+        if instruction_only_format not in {"messages", "transcript"}:
+            raise ValueError("instruction_only_format must be either 'messages' or 'transcript'.")
+        self.instruction_only_format = instruction_only_format
+        super().setup(*args, **kwargs)
+
     def warmup(self) -> None:
         logger.info(f"Warming up {self.__class__.__name__}")
         start = time.time()
@@ -360,6 +381,36 @@ class ChatCompletionsApiModelHandler(BaseOpenAICompatibleHandler):
 
     def _serialize(self, active_chat: Chat) -> list[dict[str, Any]]:
         return self._chat_messages(active_chat, audio_content_type=self.audio_content_type)
+
+    def _serialize_request(self, active_chat: Chat, response: Any) -> list[dict[str, Any]]:
+        messages = self._serialize(active_chat)
+        if (
+            getattr(self, "instruction_only_format", "messages") != "transcript"
+            or response is None
+            or not response.instructions
+            or not response.instructions.strip()
+            or active_chat.has_pending_tool_calls()
+            or not messages
+            or messages[0].get("role") != "system"
+            or not isinstance(messages[0].get("content"), str)
+            or messages[-1].get("role") != "assistant"
+            or any(not isinstance(message.get("content", ""), (str, type(None))) for message in messages)
+            or any(message.get("role") not in {"user", "assistant", "tool"} for message in messages[1:])
+        ):
+            return messages
+
+        # Keep the effective system message authoritative, including injected context
+        # and channel/language rules. The transcript never enters stored history.
+        return [
+            {"role": "system", "content": messages[0]["content"] + "\n" + _INSTRUCTION_ONLY_TRANSCRIPT_PROMPT},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {"conversation": messages[1:], "response": {"instructions": response.instructions}},
+                    ensure_ascii=False,
+                ),
+            },
+        ]
 
     def _build_optional_kwargs(self, req_tools: Any, req_tool_choice: Any) -> dict[str, Any]:
         return _build_chat_optional_kwargs(req_tools, req_tool_choice)

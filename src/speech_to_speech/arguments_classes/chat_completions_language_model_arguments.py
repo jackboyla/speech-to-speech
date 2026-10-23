@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Literal, Optional
 
 from speech_to_speech.arguments_classes.responses_api_language_model_arguments import (
     ResponsesApiLanguageModelHandlerArguments,
@@ -25,5 +25,13 @@ class ChatCompletionsLanguageModelHandlerArguments(ResponsesApiLanguageModelHand
             "Chat Completions request. Use to disable reasoning on providers where "
             "chat_template_kwargs.enable_thinking is ignored (e.g. 'none' / 'low'). When unset, falls back to "
             "the disable_thinking behaviour (chat_template_kwargs.enable_thinking=false). Default is None."
+        },
+    )
+    responses_api_instruction_only_format: Literal["messages", "transcript"] = field(
+        default="messages",
+        metadata={
+            "help": "Chat Completions only: use 'transcript' to send completed text history as request data when "
+            "response.instructions requests another reply without new input. Requires a compatible model; "
+            "ordinary user/tool turns and media history keep their native message format. Default is messages."
         },
     )

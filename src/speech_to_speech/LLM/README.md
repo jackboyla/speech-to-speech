@@ -64,7 +64,31 @@ Realtime `response.create` can request another reply after a completed assistant
 
 To test fresh assistant generation with llama.cpp, use [`--no-prefill-assistant`](https://github.com/ggml-org/llama.cpp/tree/master/tools/server#usage). For Ollama 0.40.6 using its llama.cpp runner, set `LLAMA_ARG_PREFILL_ASSISTANT=0` in the **Ollama server's environment** before starting it. Changing the speech-to-speech process's environment does not configure an already-running provider.
 
-This is a provider-specific workaround, not a guarantee that response instructions will be followed. Some models still repeat the last answer or speak when instructed to remain silent after prefill is disabled. Check those behaviors with your model before adopting the setting.
+Some models still repeat the last answer or speak when instructed to remain silent after prefill is disabled. Check those behaviors with your model before adopting the setting.
+
+For Chat Completions, `--responses_api_instruction_only_format transcript` offers an alternative: send completed history as JSON request data alongside the current `response.instructions`. This gives the model a fresh response boundary and distinguishes the current request from completed turns. Text and function calls still use the provider's normal output channels; stored conversation history stays unchanged.
+
+The option applies only to explicit, nonempty `response.instructions` when the selected history ends with a completed assistant message and contains text and completed tool exchanges. New user messages, tool-result turns, pending calls, media history, and omitted or cleared instructions keep the normal message format. The default is `messages`.
+
+A tested configuration uses [Gemma 4 E4B Q4_0](https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/blob/a69f018d7678a2b9f5e705f8903d6fb29b9b25dc/gemma-4-E4B-it-Q4_0.gguf) with llama.cpp **b10098** (`0278d836`), its bundled chat template, and reasoning enabled:
+
+```bash
+llama-server -m /path/to/gemma-4-E4B-it-Q4_0.gguf \
+  --alias local-gemma --host 127.0.0.1 --port 19740 \
+  -ngl 99 -np 1 -c 8192 -t 4 -tb 4 -fa on \
+  --jinja --reasoning on --no-mmproj --no-cache-prompt --prefill-assistant
+```
+
+Add these LLM settings to your usual speech-to-speech command:
+
+```bash
+speech-to-speech serve --llm_backend chat-completions \
+  --model_name local-gemma --responses_api_base_url http://127.0.0.1:19740/v1 \
+  --responses_api_disable_thinking false \
+  --responses_api_instruction_only_format transcript
+```
+
+Compatibility depends on the model and its template. Validate requested speech, deliberate silence, and tool calls before enabling this format with another setup. It adds prompt tokens and does not make every model follow instructions reliably.
 
 ## Language behavior
 
