@@ -85,25 +85,10 @@ def test_kokoro_records_ttfa_at_first_provider_chunk_and_preserves_first_audio(m
     assert tracker.e2e_s == pytest.approx(1.05)
 
 
-def test_kokoro_mlx_records_ttfa_before_silence_trim(monkeypatch):
-    """MLX TTFA uses provider audio arrival, not post-trim yield time."""
-    clock = [50.0]
-    monkeypatch.setattr(kokoro_handler, "perf_counter", lambda: clock[0])
+def _mlx_handler(monkeypatch: pytest.MonkeyPatch, pipeline, set_cache_limit=lambda limit: 0) -> KokoroTTSHandler:
+    monkeypatch.setattr(kokoro_handler, "mx", SimpleNamespace(set_cache_limit=set_cache_limit), raising=False)
     monkeypatch.setattr(kokoro_handler, "platform", "darwin")
-    monkeypatch.setattr(KokoroTTSHandler, "warmup", lambda self: None)
     monkeypatch.setattr(kokoro_handler.console, "print", lambda *_args, **_kwargs: None)
-
-    class FakePipeline:
-        def load_voice(self, voice: str) -> None:
-            return None
-
-        def __call__(self, *, text: str, voice: str, speed: float):
-            clock[0] = 50.08
-            # Leading silence then speech: trim would delay the first yielded sample.
-            audio = np.concatenate([np.zeros(2400, dtype=np.float32), np.full(2400, 0.2, dtype=np.float32)])
-            yield SimpleNamespace(audio=audio.reshape(1, -1))
-            clock[0] = 50.40
-
     handler = KokoroTTSHandler.__new__(KokoroTTSHandler)
     handler.should_listen = Event()
     handler.cancel_scope = None
@@ -116,8 +101,28 @@ def test_kokoro_mlx_records_ttfa_before_silence_trim(monkeypatch):
     handler._initial_lang_code = "b"
     handler.speed = 1.0
     handler.blocksize = 512
-    handler.model = SimpleNamespace(_get_pipeline=lambda lang: FakePipeline())
-    handler._pipeline = FakePipeline()
+    handler.model = SimpleNamespace(_get_pipeline=lambda lang: pipeline)
+    handler._pipeline = pipeline
+    return handler
+
+
+def test_kokoro_mlx_records_ttfa_before_silence_trim(monkeypatch):
+    """MLX TTFA uses provider audio arrival, not post-trim yield time."""
+    clock = [50.0]
+    monkeypatch.setattr(kokoro_handler, "perf_counter", lambda: clock[0])
+
+    class FakePipeline:
+        def load_voice(self, voice: str) -> None:
+            return None
+
+        def __call__(self, *, text: str, voice: str, speed: float):
+            clock[0] = 50.08
+            # Leading silence then speech: trim would delay the first yielded sample.
+            audio = np.concatenate([np.zeros(2400, dtype=np.float32), np.full(2400, 0.2, dtype=np.float32)])
+            yield SimpleNamespace(audio=audio.reshape(1, -1))
+            clock[0] = 50.40
+
+    handler = _mlx_handler(monkeypatch, FakePipeline())
     store = handler.turn_latency_store = TurnLatencyStore()
     tracker = store.get_or_create_response("mlx-1", turn_id="turn_1")
 
@@ -135,3 +140,31 @@ def test_kokoro_mlx_records_ttfa_before_silence_trim(monkeypatch):
     assert outputs
     assert tracker.tts_ttfa_s == pytest.approx(0.08)
     assert tracker.e2e_s == pytest.approx(1.08)
+
+
+def test_kokoro_mlx_runs_without_buffer_cache_and_restores_it(monkeypatch):
+    """Kokoro's freed decoder buffers are not cached, and the other MLX models get their cache limit back."""
+    events: list[object] = []
+    limit = [1000]
+
+    def set_cache_limit(new: int) -> int:
+        previous, limit[0] = limit[0], new
+        events.append(new)
+        return previous
+
+    def pipeline(*, text: str, voice: str, speed: float):
+        for _ in range(2):
+            events.append(f"segment at limit {limit[0]}")
+            yield SimpleNamespace(audio=np.full((1, 2400), 0.2, dtype=np.float32))
+
+    handler = _mlx_handler(monkeypatch, pipeline, set_cache_limit)
+    handler.turn_latency_store = TurnLatencyStore()
+
+    list(handler.process(TTSInput(text="Hello. Again.")))
+    assert events == [0, "segment at limit 0", "segment at limit 0", 1000]
+
+    events.clear()
+    reply = handler.process(TTSInput(text="Interrupted."))
+    next(reply)
+    reply.close()
+    assert events == [0, "segment at limit 0", 1000]

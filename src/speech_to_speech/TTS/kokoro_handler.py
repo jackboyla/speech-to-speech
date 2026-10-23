@@ -11,6 +11,7 @@ Model supports 8 languages with multiple voices per language.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from sys import platform
 from threading import Event
 from time import perf_counter
@@ -28,7 +29,28 @@ from speech_to_speech.pipeline.turn_latency import record_response_e2e, record_r
 from speech_to_speech.utils.mlx_lock import MLXLockContext
 from speech_to_speech.utils.utils import resolve_device
 
+try:
+    import mlx.core as mx
+except ImportError:  # MLX is only installed on macOS
+    pass
+
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _mlx_buffer_cache_disabled() -> Iterator[None]:
+    """Run Kokoro with MLX's buffer cache off.
+
+    Kokoro's decoder buffers change size with each segment's audio length, so the
+    cache would keep GBs it seldom reuses, and Kokoro runs no slower without it.
+    Callers hold the MLX lock, so the other MLX models keep their cache.
+    """
+    previous = mx.set_cache_limit(0)
+    try:
+        yield
+    finally:
+        mx.set_cache_limit(previous)
+
 
 # Language code mapping from Whisper/langdetect language codes to Kokoro lang codes
 WHISPER_LANGUAGE_TO_KOKORO_LANG = {
@@ -336,7 +358,7 @@ class KokoroTTSHandler(BaseHandler[TTSIn, TTSOut]):
         from scipy.signal import resample_poly
 
         gen = self.cancel_scope.generation if self.cancel_scope else None
-        with MLXLockContext(handler_name="KokoroTTS", timeout=10.0):
+        with MLXLockContext(handler_name="KokoroTTS", timeout=10.0), _mlx_buffer_cache_disabled():
             new_lang_code, new_voice = (
                 self._lang_and_voice_for(language_code, pinned_voice)
                 if language_code is not None

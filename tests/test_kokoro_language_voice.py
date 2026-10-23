@@ -89,6 +89,7 @@ def voice_backend(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatc
         "mlx_audio.tts.utils",
         SimpleNamespace(load_model=lambda _: SimpleNamespace(_get_pipeline=get_pipeline)),
     )
+    monkeypatch.setattr(kokoro_handler, "mx", SimpleNamespace(set_cache_limit=lambda limit: 0), raising=False)
     monkeypatch.setattr(KokoroTTSHandler, "warmup", lambda self: None)
     monkeypatch.setattr(kokoro_handler.console, "print", lambda *args, **kwargs: None)
     handler = KokoroTTSHandler.__new__(KokoroTTSHandler)
