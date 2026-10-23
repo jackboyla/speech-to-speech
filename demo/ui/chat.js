@@ -39,11 +39,15 @@ export class ChatView {
     this._chatPanelClose = $("#chat-panel-close");
     /** @type {HTMLDivElement} */
     this._chatHistory = $("#chat-history");
+    /** @type {HTMLButtonElement} */
+    this._chatNewMessages = $("#chat-new-messages");
     /** @type {HTMLDivElement} */
     this._bubbleStack = $("#bubble-stack");
 
     this._panelOpen = false;
     this._scrollQueued = false;
+    this._followHistory = true;
+    this._historyScrollTop = 0;
 
     // ── User transcript state (keyed by item_id) ───────────────────────────
     /** @type {Map<string, HTMLElement>} */
@@ -83,6 +87,12 @@ export class ChatView {
     this._chatBtn.addEventListener("click", () => (this._panelOpen ? this._closePanel() : this._openPanel()));
     this._chatPanelClose.addEventListener("click", () => this._closePanel());
     this._chatPanelBackdrop.addEventListener("click", () => this._closePanel());
+    this._chatHistory.addEventListener("scroll", () => this._trackHistoryScroll());
+    this._chatNewMessages.addEventListener("click", () => {
+      this._followHistory = true;
+      this._chatNewMessages.hidden = true;
+      this._scrollToBottom();
+    });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && this._panelOpen) this._closePanel();
     });
@@ -94,6 +104,8 @@ export class ChatView {
     this._panelOpen = true;
     this._chatPanel.classList.add("open");
     this._chatBadge.classList.remove("visible");
+    this._followHistory = true;
+    this._chatNewMessages.hidden = true;
     this._scrollToBottom();
   }
 
@@ -102,23 +114,40 @@ export class ChatView {
     this._chatPanel.classList.remove("open");
   }
 
+  // Also capture pending reader scrolls before a history mutation: its scroll
+  // event can arrive after the content grows. Ignore our own delayed events.
+  _trackHistoryScroll() {
+    if (!this._panelOpen) return;
+    const history = this._chatHistory;
+    if (history.scrollTop === this._historyScrollTop) return;
+    this._historyScrollTop = history.scrollTop;
+    this._followHistory = history.scrollHeight - history.clientHeight - history.scrollTop <= 48;
+    if (this._followHistory) this._chatNewMessages.hidden = true;
+  }
+
   // Coalesce scroll-to-bottom: a burst of cumulative transcript deltas would
   // otherwise queue one rAF per delta, all writing the same scrollTop.
   _scrollToBottom() {
-    if (!this._panelOpen || this._scrollQueued) return;
+    if (!this._panelOpen) return;
+    if (!this._followHistory) {
+      this._chatNewMessages.hidden = false;
+      return;
+    }
+    if (this._scrollQueued) return;
     this._scrollQueued = true;
     requestAnimationFrame(() => {
       this._scrollQueued = false;
-      this._chatHistory.scrollTop = this._chatHistory.scrollHeight;
+      if (!this._panelOpen) return;
+      this._chatNewMessages.hidden = this._followHistory;
+      if (this._followHistory) {
+        this._chatHistory.scrollTop = this._chatHistory.scrollHeight;
+        this._historyScrollTop = this._chatHistory.scrollTop;
+      }
     });
   }
 
   _markUnread() {
-    if (this._panelOpen) {
-      this._scrollToBottom();
-      return;
-    }
-    this._chatBadge.classList.add("visible");
+    if (!this._panelOpen) this._chatBadge.classList.add("visible");
   }
 
   // ── Shared rendering ──────────────────────────────────────────────────────
@@ -308,11 +337,15 @@ export class ChatView {
     this._userAudioByItem.clear();
     this._userHistByItem.clear();
     this.renderEmptyState();
+    this._historyScrollTop = this._chatHistory.scrollTop;
     this._chatBadge.classList.remove("visible");
+    this._followHistory = true;
+    this._chatNewMessages.hidden = true;
   }
 
   /** @param {"user"|"assistant"} role @param {string} text @param {boolean} partial @returns {HTMLElement} */
   _appendHistMsg(role, text, partial) {
+    this._trackHistoryScroll();
     const empty = this._chatHistory.querySelector(".chat-empty");
     if (empty) empty.remove();
     const el = this._buildMessageEl({ container: "hist-msg", prefix: "hist", role, text, partial });
@@ -326,6 +359,7 @@ export class ChatView {
     if (!el) return;
     const body = /** @type {HTMLElement | null} */ (el.querySelector(".hist-body"));
     if (!body) return;
+    this._trackHistoryScroll();
     body.textContent = text;
     body.hidden = !text;
     body.classList.toggle("partial", partial);
@@ -355,6 +389,7 @@ export class ChatView {
    * @param {string} name @param {string} argsJson @param {string} output
    */
   _appendHistTool(name, argsJson, output) {
+    this._trackHistoryScroll();
     const empty = this._chatHistory.querySelector(".chat-empty");
     if (empty) empty.remove();
     let pretty = argsJson;
@@ -400,6 +435,7 @@ export class ChatView {
   /** Render a captured webcam frame in the transcript (the camera tool result).
    *  @param {string} dataUrl */
   _appendHistImage(dataUrl) {
+    this._trackHistoryScroll();
     const empty = this._chatHistory.querySelector(".chat-empty");
     if (empty) empty.remove();
     const el = document.createElement("div");
@@ -536,6 +572,7 @@ export class ChatView {
    * @param {{ itemId?: string, audio: Blob, durationMs?: number, truncated?: boolean }} detail
    */
   onUserAudio(detail) {
+    this._trackHistoryScroll();
     const id = detail.itemId || `_u${++this._anonSeq}`;
     const hist = this._ensureUserHist(id);
     let container = /** @type {HTMLElement | null} */ (hist.querySelector(".hist-audio"));
@@ -635,6 +672,7 @@ export class ChatView {
 
   /** @param {HTMLElement} hist @param {import("../turn-latency.js").TurnLatency} timing */
   _appendTimings(hist, timing) {
+    this._trackHistoryScroll();
     /** @param {number|null|undefined} seconds */
     const format = (seconds) => seconds == null ? "Unavailable" : `${seconds.toFixed(2)} s`;
     const details = document.createElement("details");

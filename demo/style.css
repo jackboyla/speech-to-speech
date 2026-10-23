@@ -1861,11 +1861,24 @@ body.cam-on .footer {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  scroll-behavior: smooth;
 }
 .chat-history::-webkit-scrollbar { width: 3px; }
 .chat-history::-webkit-scrollbar-track { background: transparent; }
 .chat-history::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+
+.chat-new-messages {
+  position: absolute;
+  bottom: 16px;
+  align-self: center;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 24px;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
 
 .chat-empty {
   flex: 1;

@@ -13,7 +13,7 @@ const timing = {
   hold_s: 0, smart_status: "incomplete",
 };
 
-test("history shows per-response server timings on desktop and phone", async (t) => {
+test("history timings and scroll following work on desktop and phone", async (t) => {
   const server = createServer(async (req, res) => {
     const name = new URL(req.url, "http://localhost").pathname;
     const file = path.resolve(root, `.${name === "/" ? "/index.html" : name}`);
@@ -86,8 +86,64 @@ test("history shows per-response server timings on desktop and phone", async (t)
     assert.equal(await page.locator(".hist-note").textContent(), "Interrupted");
     assert.equal(await page.locator(".hist-msg.assistant").last().locator(".hist-timings").count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+
+    await page.evaluate(() => {
+      for (let i = 0; i < 25; i++) {
+        chat.onTranscript({ role: "user", itemId: `history-${i}`, text: `Earlier message ${i}. ` + "Some conversation text. ".repeat(5), partial: false });
+      }
+      chat.onTranscript({ role: "user", itemId: "stream", text: "Incoming text.", partial: true });
+    });
+    const atBottom = () => {
+      const history = document.querySelector("#chat-history");
+      return history.scrollHeight - history.clientHeight - history.scrollTop <= 1;
+    };
+    await page.waitForFunction(atBottom);
+    // A growing existing row must keep following even when one delta adds
+    // more than the near-bottom threshold.
+    await page.evaluate(() => chat.onTranscript({ role: "user", itemId: "stream", text: "Incoming text. ".repeat(60), partial: true }));
+    await page.waitForFunction(atBottom);
+    await page.evaluate(() => {
+      document.querySelector("#chat-history").scrollTop = 150;
+      chat.onTranscript({ role: "assistant", responseId: "new-reply", text: "New reply.", partial: true });
+      chat.onTranscript({ role: "user", itemId: "stream", text: "Incoming text. ".repeat(100), partial: false });
+    });
+    await page.waitForTimeout(400); // Catch delayed smooth scrolls as well as frame-queued writes.
+    assert.equal(await page.locator("#chat-history").evaluate((history) => history.scrollTop), 150);
+    const newMessages = page.getByRole("button", { name: "New messages ↓", exact: true });
+    if (process.env.S2S_UI_SCREENSHOTS) await page.screenshot({ path: `${process.env.S2S_UI_SCREENSHOTS}/history-paused-${width}.png` });
+    await newMessages.focus();
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(atBottom);
+    assert.equal(await newMessages.isVisible(), false);
+
+    // Follow when near the end, even if text arrives before the scroll event.
+    await page.evaluate(() => {
+      const history = document.querySelector("#chat-history");
+      history.scrollTop = history.scrollHeight - history.clientHeight - 32;
+      chat.onTranscript({ role: "assistant", responseId: "new-reply", text: "Growing reply. ".repeat(100), partial: false });
+    });
+    await page.waitForFunction(atBottom);
+    assert.equal(await newMessages.isVisible(), false);
+
+    await page.locator("#chat-history").evaluate((history) => { history.scrollTop = 150; });
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await page.evaluate(() => {
+      chat._closePanel();
+      chat.onTranscript({ role: "user", itemId: "while-closed", text: "Received while closed.", partial: false });
+      chat._openPanel();
+    });
+    await page.waitForFunction(atBottom);
+    assert.equal(await newMessages.isVisible(), false);
+
+    await page.locator("#chat-history").evaluate((history) => { history.scrollTop = 150; });
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await page.evaluate(() => chat.onTranscript({ role: "user", itemId: "before-reset", text: "Unread before reset.", partial: false }));
+    assert.equal(await newMessages.isVisible(), true);
     await page.evaluate(() => { chat.clear(); chat.reset(); });
+    assert.equal(await newMessages.isVisible(), false);
     assert.equal(await page.locator(".hist-timings").count(), 0);
+    await page.evaluate(() => chat.onTranscript({ role: "user", itemId: "fresh-session", text: "Fresh session. ".repeat(200), partial: true }));
+    await page.waitForFunction(atBottom);
     await page.close();
   }
 });
