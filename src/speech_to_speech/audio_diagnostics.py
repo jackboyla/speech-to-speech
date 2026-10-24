@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import platform
+from collections.abc import Sequence
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any
 
@@ -17,14 +19,17 @@ if TYPE_CHECKING:
     from speech_to_speech.s2s_pipeline import ParsedArguments
 
 
-def _audio_devices(client: RealtimeAudioClientConfig) -> dict[str, Any]:
+def _audio_devices(
+    client: RealtimeAudioClientConfig, devices: tuple[int | None, int | None] | None = None
+) -> dict[str, Any]:
     try:
         import sounddevice as sd
     except (ImportError, OSError):
         return {"status": "unavailable: sounddevice or PortAudio could not be loaded"}
 
     result: dict[str, Any] = {}
-    for kind, selected in (("input", client.input_device), ("output", client.output_device)):
+    input_device, output_device = devices or (client.input_device, client.output_device)
+    for kind, selected in (("input", input_device), ("output", output_device)):
         try:
             info = sd.query_devices(selected, kind)
             result[kind] = {
@@ -47,13 +52,16 @@ def _audio_devices(client: RealtimeAudioClientConfig) -> dict[str, Any]:
     return result
 
 
-def print_audio_report(
+def build_audio_report(
     command: Command,
     *,
     args: ParsedArguments | None = None,
     client: RealtimeAudioClientConfig | None = None,
-) -> None:
-    """Print only selected settings and device metadata, never an argument/config dump."""
+    streams: Sequence[Any] = (),
+    started_streams: Sequence[Any] = (),
+    trigger: str | None = None,
+) -> dict[str, Any]:
+    """Collect only selected settings and metadata, never an argument/config dump."""
     versions = {"speech-to-speech source": __version__}
     for package in (
         "speech-to-speech",
@@ -128,6 +136,16 @@ def print_audio_report(
             "dtype": "int16",
             "block_mic_during_playback": client.block_mic_during_playback,
         }
+    stream_info = {
+        kind: {
+            "device": stream.device,
+            "sample_rate_hz": stream.samplerate,
+            "callback_block_size_frames": stream.blocksize,
+            "latency_estimate_s": stream.latency,
+            "started": stream in started_streams,
+        }
+        for kind, stream in zip(("input", "output"), streams)
+    }
     report = {
         "report": "speech-to-speech audio diagnostics",
         "command": command,
@@ -135,15 +153,63 @@ def print_audio_report(
         "system": system,
         "configured": configured,
         "observed": {
-            "audio_devices": _audio_devices(client)
+            "audio_devices": _audio_devices(
+                client,
+                (
+                    stream_info.get("input", {}).get("device", client.input_device),
+                    stream_info.get("output", {}).get("device", client.output_device),
+                ),
+            )
             if client is not None
             else "not queried: serve does not own microphone/speaker devices",
-            "streams": "not opened: rates, block sizes and latencies above are settings or device defaults",
-            "backend_devices": "not observed: models are not loaded; auto/device fallbacks have not run",
-            "microphone_overflows": "unavailable: no capture in this command; the client retains no overflow counter",
+            "streams": stream_info
+            or "not opened: rates, block sizes and latencies above are settings or device defaults",
+            "backend_devices": "not observed: configured devices may differ after automatic selection or fallback",
+            "microphone_overflows": (
+                "at least one input overflow observed; cumulative count unavailable"
+                if trigger == "microphone input overflow"
+                else "unavailable: the client retains no overflow counter"
+            ),
         },
     }
-    print(json.dumps(report, indent=2, ensure_ascii=True))
+    if trigger is not None:
+        report["trigger"] = trigger
+    return report
+
+
+def print_audio_report(
+    command: Command, *, args: ParsedArguments | None = None, client: RealtimeAudioClientConfig | None = None
+) -> None:
+    print(json.dumps(build_audio_report(command, args=args, client=client), indent=2, ensure_ascii=True))
+
+
+def log_audio_report(
+    *,
+    client: RealtimeAudioClientConfig,
+    args: ParsedArguments | None,
+    streams: Sequence[Any],
+    started_streams: Sequence[Any],
+    trigger: str,
+    level: int = logging.WARNING,
+) -> None:
+    """Diagnostics must not replace an audio failure or stop a working session."""
+    logger = logging.getLogger(__name__)
+    try:
+        report = build_audio_report(
+            "local" if args is not None else "talk",
+            args=args,
+            client=client,
+            streams=streams,
+            started_streams=started_streams,
+            trigger=trigger,
+        )
+        logger.log(
+            level,
+            "Audio diagnostic report (copy with the warning/error for support):\n%s",
+            json.dumps(report, indent=2),
+        )
+    except Exception:
+        logger.log(level, "Audio diagnostic report unavailable")
 
 
 def print_configured_audio_report(command: Command, config: ResolvedConfig) -> None:

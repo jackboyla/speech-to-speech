@@ -63,6 +63,7 @@ def test_local_composes_loopback_client_with_same_server_builder(monkeypatch):
     assert client.config.api_key == "local"
     assert client.config.playback_buffer_ms == 240
     assert client.config.conversation_only is False
+    assert client.pipeline_args is args
 
 
 def test_local_resolves_backend_specific_playback_buffer_defaults(monkeypatch):

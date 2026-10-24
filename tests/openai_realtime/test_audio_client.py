@@ -3,7 +3,7 @@ import json
 import logging
 import signal
 import sys
-from threading import Event
+from threading import Event, Thread, current_thread
 from types import SimpleNamespace
 
 import pytest
@@ -1543,7 +1543,8 @@ def test_audio_client_does_not_duplicate_partial_transcript_on_cancel(capsys):
     assert playback.buffered_bytes == 0
 
 
-async def test_audio_streams_are_cleaned_up_when_output_start_fails(monkeypatch, capsys):
+async def test_audio_streams_are_cleaned_up_when_output_start_fails(monkeypatch, capsys, caplog):
+    caplog.set_level(logging.ERROR, logger="speech_to_speech.audio_diagnostics")
     events = []
     playback_args = []
 
@@ -1557,6 +1558,10 @@ async def test_audio_streams_are_cleaned_up_when_output_start_fails(monkeypatch,
         def __init__(self, name, *, fail_start=False):
             self.name = name
             self.fail_start = fail_start
+            self.device = 7 if name == "input" else 3
+            self.samplerate = 16000
+            self.blocksize = 1024
+            self.latency = 0.02
 
         def start(self):
             events.append(f"{self.name}.start")
@@ -1577,11 +1582,14 @@ async def test_audio_streams_are_cleaned_up_when_output_start_fails(monkeypatch,
     )
     monkeypatch.setitem(sys.modules, "sounddevice", fake_sounddevice)
     monkeypatch.setattr(audio_client_module, "PlaybackBuffer", recording_playback_buffer)
+    monkeypatch.setattr(
+        "speech_to_speech.audio_diagnostics._audio_devices", lambda *args: {"status": "not queried in test"}
+    )
 
     with pytest.raises(RuntimeError, match="output start failed"):
         await audio_client_module._run_audio_session(
             SimpleNamespace(),
-            RealtimeAudioClientConfig(playback_buffer_ms=240),
+            RealtimeAudioClientConfig(playback_buffer_ms=240, api_key="SECRET_KEY", instructions="SECRET_PROMPT"),
             Event(),
         )
 
@@ -1594,9 +1602,18 @@ async def test_audio_streams_are_cleaned_up_when_output_start_fails(monkeypatch,
         "output.close",
         "input.close",
     ]
+    reports = [record for record in caplog.records if record.msg.startswith("Audio diagnostic report (")]
+    assert len(reports) == 1
+    assert reports[0].levelno == logging.ERROR
+    report = json.loads(reports[0].args[0])
+    assert report["trigger"] == "audio session failure (RuntimeError)"
+    assert report["configured"]["audio_client"]["playback_buffer_ms"] == 240
+    assert report["observed"]["streams"]["input"]["started"] is True
+    assert report["observed"]["streams"]["output"]["started"] is False
+    assert "SECRET" not in reports[0].getMessage()
 
 
-async def test_open_input_stream_is_closed_when_output_construction_fails(monkeypatch):
+async def test_open_input_stream_is_closed_when_output_construction_fails(monkeypatch, caplog):
     events = []
 
     class FakeInputStream:
@@ -1612,6 +1629,11 @@ async def test_open_input_stream_is_closed_when_output_construction_fails(monkey
     )
     monkeypatch.setitem(sys.modules, "sounddevice", fake_sounddevice)
 
+    def fail_report(*args, **kwargs):
+        raise RuntimeError("SECRET_DIAGNOSTIC_ERROR")
+
+    monkeypatch.setattr("speech_to_speech.audio_diagnostics.build_audio_report", fail_report)
+
     with pytest.raises(RuntimeError, match="output construction failed"):
         await audio_client_module._run_audio_session(
             SimpleNamespace(),
@@ -1620,6 +1642,8 @@ async def test_open_input_stream_is_closed_when_output_construction_fails(monkey
         )
 
     assert events == ["input.close"]
+    assert "Audio diagnostic report unavailable" in caplog.text
+    assert "SECRET_DIAGNOSTIC_ERROR" not in caplog.text
 
 
 async def test_audio_client_startup_and_shutdown_use_public_realtime_connection(monkeypatch):
@@ -1648,7 +1672,8 @@ async def test_audio_client_startup_and_shutdown_use_public_realtime_connection(
     fake_client = FakeClient()
     stop_event = Event()
 
-    async def fake_audio_session(conn, config, received_stop_event):
+    async def fake_audio_session(conn, config, received_stop_event, *, pipeline_args):
+        assert pipeline_args is None
         audio_session_calls.append((conn, config, received_stop_event))
         received_stop_event.set()
 
@@ -1738,7 +1763,7 @@ def test_clean_conversation_has_colors_literal_text_and_no_blank_lines_between_t
     )
 
 
-async def test_ready_waits_for_audio_devices_and_session_acknowledgement(monkeypatch, capsys):
+async def test_ready_waits_for_audio_devices_and_session_acknowledgement(monkeypatch, capsys, caplog):
     starts = []
     stop = Event()
 
@@ -1780,6 +1805,7 @@ async def test_ready_waits_for_audio_devices_and_session_acknowledgement(monkeyp
         ),
     )
     await audio_client_module._run_audio_session(Connection(), RealtimeAudioClientConfig(), stop)
+    assert "Audio diagnostic report" not in caplog.text
 
 
 def test_voice_status_is_rewritten_in_place_below_the_conversation():
@@ -1812,3 +1838,127 @@ def test_voice_status_prints_lines_without_a_terminal(capsys):
     renderer = _FriendlyEventRenderer(conversation_only=False)
     renderer.show_status("Voice [2/38]: Zoey — selected")
     assert capsys.readouterr().out == "Voice [2/38]: Zoey — selected\n"
+
+
+@pytest.mark.parametrize("source", ["callback", "shutdown", "transcription", "error", "response"])
+async def test_audio_problems_add_one_report_off_callback_without_stopping_session(source, monkeypatch, caplog):
+    from speech_to_speech import audio_diagnostics
+    from speech_to_speech.s2s_pipeline import parse_arguments, prepare_all_args
+
+    stop = Event()
+    callback_threads = []
+    report_threads = []
+    device_queries = []
+    build_report = audio_diagnostics.build_audio_report
+
+    def recording_report(*args, **kwargs):
+        report_threads.append(current_thread().ident)
+        return build_report(*args, **kwargs)
+
+    def device_info(client, devices=None):
+        device_queries.append(devices)
+        return {"status": "not queried in test"}
+
+    class Overflow:
+        input_overflow = True
+
+        def __str__(self):
+            return "input overflow"
+
+    class Stream:
+        samplerate = 16000.0
+        blocksize = 0
+        latency = 0.03
+
+        def __init__(self, *, kind, callback, **kwargs):
+            self.kind = kind
+            self.callback = callback
+            self.device = 7 if kind == "input" else 3
+
+        def start(self):
+            if self.kind == "input" and source == "callback":
+
+                def warn():
+                    callback_threads.append(current_thread().ident)
+                    self.callback(b"\0\0", 1, None, Overflow())
+                    self.callback(b"\0\0", 1, None, Overflow())
+
+                thread = Thread(target=warn)
+                thread.start()
+                thread.join()
+            elif source == "callback":
+                self.callback(bytearray(2), 1, None, True)
+
+        def stop(self):
+            if self.kind == "output" and source == "shutdown":
+                callback_threads.append(current_thread().ident)
+                self.callback(bytearray(2), 1, None, True)
+
+        def close(self):
+            pass
+
+    class Connection(RecordingConnection):
+        count = 0
+
+        async def recv(self):
+            self.count += 1
+            if source in {"transcription", "error", "response"} and self.count <= 2:
+                if source == "response":
+                    return SimpleNamespace(type="response.done", response=SimpleNamespace(status="failed", id=None))
+                return SimpleNamespace(
+                    type="error" if source == "error" else "conversation.item.input_audio_transcription.failed",
+                    item_id="item_1",
+                    error=SimpleNamespace(
+                        type="transcription_error", message="SECRET_ERROR_DETAIL", code=None, event_id=None
+                    ),
+                )
+            if source == "callback":
+                await wait_until(
+                    lambda: any(record.msg.startswith("Audio diagnostic report (") for record in caplog.records)
+                )
+            assert not stop.is_set()
+            stop.set()
+            await asyncio.Future()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "sounddevice",
+        SimpleNamespace(
+            RawInputStream=lambda **kw: Stream(kind="input", **kw),
+            RawOutputStream=lambda **kw: Stream(kind="output", **kw),
+        ),
+    )
+    monkeypatch.setattr(audio_diagnostics, "build_audio_report", recording_report)
+    monkeypatch.setattr(audio_diagnostics, "_audio_devices", device_info)
+    pipeline_args = parse_arguments(["--device", "cpu"], command="local")
+    prepare_all_args(pipeline_args)
+    await audio_client_module._run_audio_session(
+        Connection(),
+        RealtimeAudioClientConfig(chunk_size=0, api_key="SECRET_KEY", instructions="SECRET_PROMPT"),
+        stop,
+        pipeline_args=pipeline_args,
+    )
+    reports = [record for record in caplog.records if record.msg.startswith("Audio diagnostic report (")]
+    assert len(reports) == 1
+    assert len(report_threads) == 1
+    assert report_threads[0] not in callback_threads
+    assert report_threads[0] != current_thread().ident
+    assert device_queries == [(7, 3)]
+    report = json.loads(reports[0].args[0])
+    assert report["command"] == "local"
+    assert (
+        report["trigger"]
+        == {
+            "callback": "microphone input overflow",
+            "shutdown": "speaker status warning",
+            "transcription": "realtime conversation.item.input_audio_transcription.failed",
+            "error": "realtime error",
+            "response": "realtime response failure",
+        }[source]
+    )
+    assert report["configured"]["backends"]["stt"]["device"] == "cpu"
+    assert report["observed"]["streams"]["input"]["callback_block_size_frames"] == 0
+    if source == "callback":
+        assert "at least one" in report["observed"]["microphone_overflows"]
+        assert caplog.text.count("Microphone status: input overflow") == 2
+    assert "SECRET" not in reports[0].getMessage()

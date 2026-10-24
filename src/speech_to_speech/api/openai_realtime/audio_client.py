@@ -20,7 +20,7 @@ from importlib import import_module
 from ipaddress import ip_address
 from queue import Empty, Full, Queue
 from threading import Event, Lock
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 from jsonschema import SchemaError, ValidationError
@@ -37,6 +37,9 @@ from speech_to_speech.api.openai_realtime.tool_followup import (
 )
 from speech_to_speech.api.openai_realtime.voice_controls import VoiceSelection, arrow_steps, has_terminal_arrows
 from speech_to_speech.pipeline.transcript_logging import log_exception
+
+if TYPE_CHECKING:
+    from speech_to_speech.s2s_pipeline import ParsedArguments
 
 logger = logging.getLogger(__name__)
 
@@ -1012,13 +1015,34 @@ async def _run_audio_session(
     conn: Any,
     config: RealtimeAudioClientConfig,
     stop_event: Event,
+    *,
+    pipeline_args: ParsedArguments | None = None,
 ) -> None:
-    import sounddevice as sd
+    from speech_to_speech.audio_diagnostics import log_audio_report
 
     mic_queue: Queue[bytes] = Queue(maxsize=128)
     playback = PlaybackBuffer(config.recv_rate, startup_buffer_ms=config.playback_buffer_ms)
     renderer = _FriendlyEventRenderer(conversation_only=config.conversation_only)
     tool_calls = _ToolCallCoordinator(conn, config)
+    loop = asyncio.get_running_loop()
+    opened_streams: list[Any] = []
+    started_streams: list[Any] = []
+    report_task: asyncio.Task[None] | None = None
+
+    def request_report(trigger: str, *, level: int = logging.WARNING) -> None:
+        nonlocal report_task
+        if report_task is None:
+            report_task = asyncio.create_task(
+                asyncio.to_thread(
+                    log_audio_report,
+                    client=config,
+                    args=pipeline_args,
+                    streams=tuple(opened_streams),
+                    started_streams=tuple(started_streams),
+                    trigger=trigger,
+                    level=level,
+                )
+            )
 
     voices = VoiceSelection(conn, config, renderer.show_status) if len(config.voice_choices) > 1 else None
 
@@ -1039,11 +1063,15 @@ async def _run_audio_session(
     def callback_recv(outdata: Any, _frames: int, _time_info: Any, status: Any) -> None:
         if status:
             logger.warning("Speaker status: %s", status)
+            loop.call_soon_threadsafe(request_report, "speaker status warning")
         playback.write(outdata)
 
     def callback_send(indata: Any, _frames: int, _time_info: Any, status: Any) -> None:
         if status:
             logger.warning("Microphone status: %s", status)
+            loop.call_soon_threadsafe(
+                request_report, "microphone input overflow" if status.input_overflow else "microphone status warning"
+            )
         if config.block_mic_during_playback and playback.is_active():
             return
         try:
@@ -1076,11 +1104,15 @@ async def _run_audio_session(
                 renderer=renderer,
                 print_json=config.print_json,
             )
+            if event.type in {"error", "conversation.item.input_audio_transcription.failed"}:
+                request_report(f"realtime {event.type}", level=logging.ERROR)
+            elif event.type == "response.done" and event.response.status not in {"completed", "cancelled"}:
+                request_report("realtime response failure", level=logging.ERROR)
 
-    opened_streams: list[Any] = []
-    started_streams: list[Any] = []
     tasks: set[asyncio.Task[Any]] = set()
     try:
+        import sounddevice as sd
+
         input_stream = sd.RawInputStream(
             samplerate=config.send_rate,
             channels=1,
@@ -1126,6 +1158,9 @@ async def _run_audio_session(
         for task in done:
             if not task.cancelled() and task.exception() is not None:
                 raise task.exception()  # type: ignore[misc]
+    except Exception as exc:
+        request_report(f"audio session failure ({type(exc).__name__})", level=logging.ERROR)
+        raise
     finally:
         stop_event.set()
         for task in tasks:
@@ -1146,12 +1181,17 @@ async def _run_audio_session(
                 stream.close()
             except Exception:
                 logger.exception("Failed to close local audio stream")
+        # stop()/close() can wait for callbacks that queue their first report request.
+        await asyncio.sleep(0)
+        if report_task is not None:
+            await report_task
 
 
 async def listen_and_play_realtime(
     config: RealtimeAudioClientConfig,
     *,
     stop_event: Event | None = None,
+    pipeline_args: ParsedArguments | None = None,
 ) -> None:
     """Connect microphone/speaker audio to a Realtime server over WebSocket."""
 
@@ -1171,6 +1211,7 @@ async def listen_and_play_realtime(
                         conn,
                         config,
                         stop_event,
+                        pipeline_args=pipeline_args,
                     )
                     return
             except asyncio.CancelledError:
@@ -1220,9 +1261,12 @@ def run_realtime_audio_client(config: RealtimeAudioClientConfig) -> None:
 class RealtimeAudioClient:
     """ThreadManager handler that embeds the packaged client for ``local``."""
 
-    def __init__(self, stop_event: Event, config: RealtimeAudioClientConfig) -> None:
+    def __init__(
+        self, stop_event: Event, config: RealtimeAudioClientConfig, *, pipeline_args: ParsedArguments | None = None
+    ) -> None:
         self.stop_event = stop_event
         self.config = config
+        self.pipeline_args = pipeline_args
 
     def run(self) -> None:
         try:
@@ -1230,6 +1274,7 @@ class RealtimeAudioClient:
                 listen_and_play_realtime(
                     self.config,
                     stop_event=self.stop_event,
+                    pipeline_args=self.pipeline_args,
                 )
             )
         except Exception:

@@ -341,7 +341,7 @@ def build_configured_server(config: ResolvedConfig, stop_event: Event, *, local:
         result._resources.append(result.server)
         result._handlers.append(result.server)
         if client_config is not None:
-            result.client = RealtimeAudioClient(event, client_config)
+            result.client = RealtimeAudioClient(event, client_config, pipeline_args=args)
             result._resources.append(result.client)
             result._handlers.append(result.client)
     except BaseException as exc:

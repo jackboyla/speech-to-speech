@@ -527,6 +527,7 @@ def test_generation_dictionary_replacement_preserves_explicit_empty(tmp_path, bu
 def test_local_client_failure_is_recorded_without_provider_logs(config, builder, monkeypatch, caplog):
     config.pipelines = {"primary": config.pipelines["primary"]}
     result = runtime.build_configured_server(config, Event(), local=True)
+    assert result.client.pipeline_args.llm_backend.name == "chat-completions"
     monkeypatch.setattr(result.server, "run", lambda: result.server.stop_event.wait())
 
     async def failed_client(*args, **kwargs):

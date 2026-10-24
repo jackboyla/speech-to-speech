@@ -58,7 +58,8 @@ speech-to-speech local --verbose
 Use `--verbose --log_level debug` for more detailed local logs. Raw event output
 (`local --local_audio_print_json` or `talk --print-json`) also enables diagnostic output.
 
-For a copyable support report, see [audio diagnostics](./docs/audio-diagnostics.md).
+Audio warnings and session failures automatically include a support report.
+See [audio diagnostics](./docs/audio-diagnostics.md) for its contents and manual collection.
 
 On Ubuntu, first install the audio libraries with `sudo apt-get install libportaudio2 libsndfile1`. The default Linux Qwen3-TTS wheel targets CUDA 12.8 and Ubuntu 24.04; see the [CUDA note](#cuda-note-for-qwen3-tts) for other systems. On Windows, activate the environment with `.venv\Scripts\Activate.ps1`.
 

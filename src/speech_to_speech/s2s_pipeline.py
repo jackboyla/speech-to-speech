@@ -804,6 +804,7 @@ def build_local_pipeline(args: ParsedArguments, stop_event: Event) -> ThreadMana
             tool_executor=tool_executor,
             tool_response_create=tool_response_create,
         ),
+        pipeline_args=args,
     )
     return ThreadManager([*server_manager.handlers, client])
 
