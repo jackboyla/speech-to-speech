@@ -13,6 +13,13 @@ class ResponsesApiLanguageModelHandlerArguments(LanguageModelBaseArguments):
             "which is not audio-capable; --stt none requires an explicitly selected audio-input model."
         },
     )
+    responses_api_session_models: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Comma-separated model ids a Realtime session may select with its `model` field. "
+            "Other session models fall back to --model_name. Default is None (always use --model_name)."
+        },
+    )
     responses_api_api_key: Optional[str] = field(
         default=None,
         metadata={"help": "API key used to authenticate access to the OpenAI-compatible API. Default is None."},

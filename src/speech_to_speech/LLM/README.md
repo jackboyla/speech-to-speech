@@ -56,6 +56,19 @@ export OPENAI_API_KEY=...
 speech-to-speech local --llm_backend responses-api
 ```
 
+To let Realtime clients choose among models behind a router such as [llama-swap](https://github.com/mostlygeek/llama-swap), list them with `--responses_api_session_models`:
+
+```bash
+speech-to-speech serve \
+  --llm_backend responses-api \
+  --model_name gemma \
+  --responses_api_session_models gemma,qwen \
+  --responses_api_base_url http://127.0.0.1:8080/v1 \
+  --responses_api_api_key ""
+```
+
+A session that sets `model` to a listed id (for example with `session.update`) uses it for its next responses; any other value uses `--model_name`.
+
 Speech recognition and synthesis stay local either way. With a hosted provider, transcribed text and conversation history are sent to it. See [LLM backends](../../../README.md#llm-backends) for the llama.cpp setup, provider examples, and direct audio input.
 
 ## Language behavior

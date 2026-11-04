@@ -170,6 +170,7 @@ def _request_chat_completions(
 ) -> Any:
     """Issue a Chat Completions request with consistent streaming usage accounting."""
     create_kwargs = dict(optional_kwargs)
+    model_name = create_kwargs.pop("model", model_name)
     if stream:
         create_kwargs["stream_options"] = {"include_usage": True}
     return client.chat.completions.create(

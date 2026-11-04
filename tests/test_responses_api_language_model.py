@@ -1301,6 +1301,24 @@ def test_disable_thinking_passes_extra_body():
     assert captured["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
 
 
+def test_allowed_session_model_selects_responses_model():
+    handler = _make_handler()
+    handler.session_models = frozenset({"qwen"})
+    captured = {}
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return _make_stream([_make_text_delta_event("Ok"), _make_output_item_done_event(content="Ok")])
+
+    handler.client = SimpleNamespace(responses=SimpleNamespace(create=fake_create))
+    request = _make_request("Hi")
+    request.runtime_config.session.model = "qwen"
+
+    list(handler.process(request))
+
+    assert captured["model"] == "qwen"
+
+
 def test_no_disable_thinking_omits_extra_body():
     handler = _make_handler(disable_thinking=False)
     captured = {}

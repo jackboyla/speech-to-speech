@@ -181,12 +181,11 @@ class ResponsesApiModelHandler(BaseOpenAICompatibleHandler):
 
     def _request(self, api_input: Any, optional_kwargs: dict[str, Any]) -> Any:
         return self.client.responses.create(
-            model=self.model_name,
             input=api_input,
             stream=self.stream,
             extra_body=self._extra_body,
             timeout=self.request_timeout,
-            **optional_kwargs,
+            **{"model": self.model_name, **optional_kwargs},
         )
 
     @staticmethod

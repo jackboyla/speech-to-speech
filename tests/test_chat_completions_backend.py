@@ -102,7 +102,7 @@ class _FakeClient:
         return self
 
 
-def _make_handler(stream=True, *, base_url="http://fake/v1", reasoning_effort=None):
+def _make_handler(stream=True, *, base_url="http://fake/v1", reasoning_effort=None, session_models=None):
     """Build a handler whose warmup hits the fake client (no network)."""
     orig_openai = base_mod.OpenAI
     base_mod.OpenAI = _FakeClient
@@ -119,6 +119,7 @@ def _make_handler(stream=True, *, base_url="http://fake/v1", reasoning_effort=No
                 disable_thinking=True,
                 reasoning_effort=reasoning_effort,
                 compact_history=False,
+                session_models=session_models,
             ),
         )
     finally:
@@ -152,11 +153,12 @@ def _drive(
     chat=None,
     response=None,
     instructions="Du bist ein Roboter.",
+    model=None,
 ):
     chat = chat or Chat(10)
     if user:
         chat.add_item(make_user_message(user))
-    session = RealtimeSessionCreateRequest(type="realtime", instructions=instructions)
+    session = RealtimeSessionCreateRequest(type="realtime", instructions=instructions, model=model)
     if tools is not None:
         session.tools = tools
     if tool_choice is not None:
@@ -383,6 +385,13 @@ def test_chat_completions_backend_uses_configured_audio_url_payload():
     audio_part = handler.client.chat.completions.last_kwargs["messages"][-1]["content"][0]
     assert audio_part["type"] == "audio_url"
     assert audio_part["audio_url"]["url"].startswith("data:audio/wav;base64,UklGR")
+
+
+@pytest.mark.parametrize(("session_model", "expected"), [("qwen", "qwen"), ("s2s-local", "test-model")])
+def test_session_model_must_be_listed_to_select_llm(session_model, expected):
+    h = _make_handler(stream=False, session_models="gemma, qwen")
+    _drive(h, model=session_model)
+    assert h.client.chat.completions.last_kwargs["model"] == expected
 
 
 def test_streaming_text_and_usage():
